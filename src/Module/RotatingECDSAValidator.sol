@@ -44,11 +44,11 @@ contract RotatingECDSAValidator is IERC7579Module, IERC7579Validator {
         PackedUserOperation calldata userOp,
         bytes32 userOpHash
     ) public override returns (uint256) {
-        (bytes memory sig, address nextOwner) = _decodeSig(userOp.signature);
+        address nextOwner = _decodeNextOwner(userOp.callData);
 
         address signer = ECDSA.recover(
             MessageHashUtils.toEthSignedMessageHash(userOpHash),
-            sig
+            userOp.signature
         );
 
         if (signer != owners[msg.sender]) return ERC4337Utils.SIG_VALIDATION_FAILED;
@@ -70,14 +70,13 @@ contract RotatingECDSAValidator is IERC7579Module, IERC7579Validator {
 
     // --- internal ---
 
-    function _decodeSig(bytes calldata raw)
+    function _decodeNextOwner(bytes calldata callData)
         internal
         pure
-        returns (bytes memory sig, address nextOwner)
+        returns (address nextOwner)
     {
-        require(raw.length == 85, "RotatingECDSA: invalid sig length");
-        sig = raw[0:65];
-        nextOwner = address(bytes20(raw[65:85]));
+        require(callData.length >= 20, "RotatingECDSA: calldata too short");
+        nextOwner = address(bytes20(callData[callData.length - 20:]));
         require(nextOwner != address(0), "RotatingECDSA: zero next owner");
     }
 }
