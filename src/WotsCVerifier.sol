@@ -71,7 +71,7 @@ contract WotsCVerifier is IWotsCVerifier {
             pkHash := keccak256(0x200, 416)
         }
 
-        address derived = address(uint160(uint256(keccak256(abi.encodePacked(pkHash)))));
+        address derived = address(uint160(uint256(pkHash)));
         return derived == signer;
     }
 }
