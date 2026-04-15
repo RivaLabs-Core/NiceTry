@@ -12,7 +12,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 ///
 ///         callData layout:
 ///         [4 bytes selector][normal ABI-encoded params][20 bytes nextOwner]
-contract SimpleAccount is IAccount {
+contract SimpleAccount_ECDSA is IAccount {
     address public owner;
     IEntryPoint public immutable entryPoint;
 
@@ -46,7 +46,7 @@ contract SimpleAccount is IAccount {
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
         uint256 missingAccountFunds
-    ) external onlyEntryPoint returns (uint256 validationData) {
+    ) override external onlyEntryPoint returns (uint256 validationData) {
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(userOpHash);
         address signer = ECDSA.recover(ethHash, userOp.signature);
 

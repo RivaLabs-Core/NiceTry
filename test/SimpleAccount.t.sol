@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount.sol";
+import "../src/SimpleAccount_ECDSA.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
@@ -10,7 +10,7 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 
 contract SimpleAccountTest is Test {
     SimpleAccountFactory factory;
-    SimpleAccount account;
+    SimpleAccount_ECDSA account;
     IEntryPoint entryPoint;
 
     uint256 ownerPk0 = 0xA11CE;
@@ -38,8 +38,8 @@ contract SimpleAccountTest is Test {
 
         factory = new SimpleAccountFactory(entryPoint);
 
-        address accountAddr = factory.createAccount(owner0, 0);
-        account = SimpleAccount(payable(accountAddr));
+        address accountAddr = factory.createAccount(owner0, 0, 0);
+        account = SimpleAccount_ECDSA(payable(accountAddr));
 
         vm.deal(address(account), 100 ether);
     }
@@ -54,25 +54,25 @@ contract SimpleAccountTest is Test {
     }
 
     function test_FactoryDeterministicAddress() public view {
-        address predicted = factory.getAddress(owner0, 0);
+        address predicted = factory.getAddress(owner0, 0, 0);
         assertEq(predicted, address(account));
     }
 
     function test_FactoryDifferentSaltGivesDifferentAddress() public view {
-        address addr0 = factory.getAddress(owner0, 0);
-        address addr1 = factory.getAddress(owner0, 1);
+        address addr0 = factory.getAddress(owner0, 0, 0);
+        address addr1 = factory.getAddress(owner0, 1, 0);
         assertTrue(addr0 != addr1);
     }
 
     function test_FactoryDifferentOwnerGivesDifferentAddress() public {
-        address addr1 = factory.getAddress(owner0, 0);
-        address addr2 = factory.getAddress(makeAddr("other"), 0);
+        address addr1 = factory.getAddress(owner0, 0, 0);
+        address addr2 = factory.getAddress(makeAddr("other"), 0, 0);
         assertTrue(addr1 != addr2);
     }
 
     function test_FactoryReturnsSameAddressIfAlreadyDeployed() public {
-        address first = factory.createAccount(owner0, 0);
-        address second = factory.createAccount(owner0, 0);
+        address first = factory.createAccount(owner0, 0, 0);
+        address second = factory.createAccount(owner0, 0, 0);
         assertEq(first, second);
     }
 
@@ -113,7 +113,7 @@ contract SimpleAccountTest is Test {
 
         vm.prank(ENTRYPOINT);
         vm.expectEmit(true, true, false, false);
-        emit SimpleAccount.OwnerRotated(owner0, owner1);
+        emit SimpleAccount_ECDSA.OwnerRotated(owner0, owner1);
         (bool ok,) = address(account).call(callData);
         assertTrue(ok);
     }
@@ -199,7 +199,7 @@ contract SimpleAccountTest is Test {
         PackedUserOperation memory userOp = _buildUserOp(hex"00", 0);
 
         vm.prank(makeAddr("random"));
-        vm.expectRevert("SimpleAccount: not from EntryPoint");
+        vm.expectRevert("SimpleAccount_ECDSA: not from EntryPoint");
         account.validateUserOp(userOp, keccak256("x"), 0);
     }
 
