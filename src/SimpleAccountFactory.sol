@@ -12,8 +12,9 @@ contract SimpleAccountFactory {
 
     event AccountCreated(address indexed account, address indexed owner, uint256 salt);
 
-    constructor(IEntryPoint _entryPoint) {
+    constructor(IEntryPoint _entryPoint, IWotsCVerifier _wotsVerifier) {
         ENTRY_POINT = _entryPoint;
+        WOTS_VERIFIER = _wotsVerifier;
     }
 
     function createAccount(address owner, uint256 salt, uint8 mode) external returns (address) {
@@ -27,10 +28,12 @@ contract SimpleAccountFactory {
             SimpleAccount_ECDSA account = new SimpleAccount_ECDSA{salt: fullSalt}(ENTRY_POINT);
             account.initialize(owner);
             accountAddr = address(account);
-        } else if (mode == 1){   
+        } else if (mode == 1){
             SimpleAccount_WOTS account = new SimpleAccount_WOTS{salt: fullSalt}(ENTRY_POINT, WOTS_VERIFIER);
             account.initialize(owner);
             accountAddr = address(account);
+        } else {
+            revert("SimpleAccountFactory: invalid mode");
         }
 
         emit AccountCreated(accountAddr, owner, salt);
@@ -56,9 +59,11 @@ contract SimpleAccountFactory {
                 fullSalt,
                 keccak256(abi.encodePacked(
                     type(SimpleAccount_WOTS).creationCode,
-                    abi.encode(ENTRY_POINT)
+                    abi.encode(ENTRY_POINT, WOTS_VERIFIER)
                 ))
             )))));
+        } else {
+            revert("SimpleAccountFactory: invalid mode");
         }
     }
 

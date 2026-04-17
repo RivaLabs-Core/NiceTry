@@ -6,7 +6,7 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
 
-/// @title WotsAccount
+/// @title SimpleAccount_WOTS
 /// @notice ERC-4337 smart account with WOTS+C post-quantum signature verification
 ///         and automatic owner rotation.
 ///
@@ -14,10 +14,14 @@ import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
 ///         not an ECDSA address. Each signature is one-time use — after every
 ///         validated UserOp, the owner rotates to the next WOTS+C address.
 ///
-///         Signature layout in userOp.signature:
-///         [468 bytes WOTS+C blob][20 bytes nextOwner]
+///         userOp.signature layout:
+///         [468 bytes WOTS+C blob]
 ///
-///         The blob is verified against bytes32ToString(userOpHash) as the message.
+///         userOp.callData layout:
+///         [4 bytes selector][normal ABI-encoded params][20 bytes nextOwner]
+///
+///         nextOwner MUST live in callData (which userOpHash commits to), not
+///         in signature — otherwise a relayer could rewrite it post-signing.
 contract SimpleAccount_WOTS is IAccount {
 
     address public owner;
@@ -57,14 +61,15 @@ contract SimpleAccount_WOTS is IAccount {
         bytes32 userOpHash,
         uint256 missingAccountFunds
     ) external onlyEntryPoint returns (uint256 validationData) {
-        // Extract WOTS+C blob (first 468 bytes) and nextOwner (last 20 bytes)
-        require(userOp.signature.length >= WOTS_BLOB_LEN + 20, "WotsAccount: sig too short");
+        // nextOwner is the last 20 bytes of callData (authenticated, since
+        // userOpHash commits to callData). The WOTS+C blob is the full signature.
+        require(userOp.signature.length == WOTS_BLOB_LEN, "WotsAccount: bad sig length");
+        require(userOp.callData.length >= 24, "WotsAccount: missing next owner"); // 4 selector + 20 min
 
-        bytes calldata blob = userOp.signature[0:WOTS_BLOB_LEN];
-        address nextOwner = address(bytes20(userOp.signature[WOTS_BLOB_LEN:WOTS_BLOB_LEN + 20]));
+        address nextOwner = address(bytes20(userOp.callData[userOp.callData.length - 20:]));
 
         // Verify WOTS+C signature: blob + message must resolve to current owner
-        bool valid = VERIFIER.verify(blob, userOpHash, owner);
+        bool valid = VERIFIER.verify(userOp.signature, userOpHash, owner);
 
         validationData = valid ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
 
@@ -115,19 +120,6 @@ contract SimpleAccount_WOTS is IAccount {
         address previous = owner;
         owner = nextOwner;
         emit OwnerRotated(previous, nextOwner);
-    }
-
-    /// @dev Convert bytes32 to "0x..." hex string (66 chars)
-    function _bytes32ToHexString(bytes32 data) internal pure returns (string memory) {
-        bytes memory hexChars = "0123456789abcdef";
-        bytes memory str = new bytes(66);
-        str[0] = "0";
-        str[1] = "x";
-        for (uint256 i = 0; i < 32; i++) {
-            str[2 + i * 2] = hexChars[uint8(data[i]) >> 4];
-            str[3 + i * 2] = hexChars[uint8(data[i]) & 0x0f];
-        }
-        return string(str);
     }
 
     receive() external payable {}
