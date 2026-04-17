@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../src/SimpleAccount_WOTS.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
+import {WOTS_BLOB_LEN} from "../src/WotsCVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 
@@ -36,8 +37,6 @@ contract SimpleAccountWotsTest is Test {
     address recipient = makeAddr("recipient");
 
     address constant ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
-
-    uint256 constant WOTS_BLOB_LEN = 468;
 
     function setUp() public {
         entryPoint = IEntryPoint(ENTRYPOINT);
@@ -313,7 +312,7 @@ contract SimpleAccountWotsTest is Test {
         );
     }
 
-    /// @dev 468-byte dummy blob. Content irrelevant since the verifier is mocked.
+    /// @dev WOTS_BLOB_LEN-byte dummy blob. Content irrelevant since the verifier is mocked.
     function _dummyBlob() internal pure returns (bytes memory blob) {
         blob = new bytes(WOTS_BLOB_LEN);
     }
