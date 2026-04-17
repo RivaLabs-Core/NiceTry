@@ -34,14 +34,14 @@ contract RotatingECDSAValidatorTest is Test {
 
     // --- helpers ---
 
-    function _op(address sender, bytes memory sig)
+    function _op(address sender, bytes memory callData, bytes memory sig)
         internal pure returns (PackedUserOperation memory)
     {
         return PackedUserOperation({
             sender:             sender,
             nonce:              0,
             initCode:           "",
-            callData:           "",
+            callData:           callData,
             accountGasLimits:   bytes32(0),
             preVerificationGas: 0,
             gasFees:            bytes32(0),
@@ -50,12 +50,17 @@ contract RotatingECDSAValidatorTest is Test {
         });
     }
 
-    function _sign(uint256 signerKey, bytes32 opHash, address nextOwner)
+    function _sign(uint256 signerKey, bytes32 opHash)
         internal pure returns (bytes memory)
     {
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(opHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, ethHash);
-        return abi.encodePacked(r, s, v, nextOwner);
+        return abi.encodePacked(r, s, v);
+    }
+
+    /// @dev callData payload that ends with nextOwner as its last 20 bytes.
+    function _cd(address nextOwner) internal pure returns (bytes memory) {
+        return abi.encodePacked(bytes20(nextOwner));
     }
 
     // --- onInstall ---
@@ -92,7 +97,7 @@ contract RotatingECDSAValidatorTest is Test {
     function test_nexusGuard_rejectsUninstalledValidator() public {
         bytes32 opHash = keccak256("op");
         vm.expectRevert("MockNexus: validator not installed");
-        accountB.validateUserOp(_op(address(accountB), _sign(key0, opHash, owner1)), opHash);
+        accountB.validateUserOp(_op(address(accountB), _cd(owner1), _sign(key0, opHash)), opHash);
     }
 
     // --- validateUserOp success ---
@@ -100,14 +105,14 @@ contract RotatingECDSAValidatorTest is Test {
     function test_validateUserOp_returnsSuccess() public {
         bytes32 opHash = keccak256("op1");
         uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _sign(key0, opHash, owner1)), opHash
+            _op(address(accountA), _cd(owner1), _sign(key0, opHash)), opHash
         );
         assertEq(result, 0);
     }
 
     function test_validateUserOp_rotatesOwner() public {
         bytes32 opHash = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, opHash, owner1)), opHash);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, opHash)), opHash);
         assertEq(validator.owners(address(accountA)), owner1);
     }
 
@@ -115,20 +120,20 @@ contract RotatingECDSAValidatorTest is Test {
         bytes32 opHash = keccak256("op1");
         vm.expectEmit(true, true, true, true);
         emit RotatingECDSAValidator.OwnerRotated(address(accountA), owner0, owner1);
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, opHash, owner1)), opHash);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, opHash)), opHash);
     }
 
     function test_validateUserOp_chainRotation() public {
         bytes32 h1 = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, h1, owner1)), h1);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, h1)), h1);
         assertEq(validator.owners(address(accountA)), owner1);
 
         bytes32 h2 = keccak256("op2");
-        accountA.validateUserOp(_op(address(accountA), _sign(key1, h2, owner2)), h2);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner2), _sign(key1, h2)), h2);
         assertEq(validator.owners(address(accountA)), owner2);
 
         bytes32 h3 = keccak256("op3");
-        accountA.validateUserOp(_op(address(accountA), _sign(key2, h3, owner0)), h3);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner0), _sign(key2, h3)), h3);
         assertEq(validator.owners(address(accountA)), owner0);
     }
 
@@ -137,24 +142,24 @@ contract RotatingECDSAValidatorTest is Test {
     function test_validateUserOp_wrongSignerReturnsFailed() public {
         bytes32 opHash = keccak256("op1");
         uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _sign(0xDEAD, opHash, owner1)), opHash
+            _op(address(accountA), _cd(owner1), _sign(0xDEAD, opHash)), opHash
         );
         assertEq(result, 1);
     }
 
     function test_validateUserOp_wrongSignerDoesNotRotate() public {
         bytes32 opHash = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(0xDEAD, opHash, owner1)), opHash);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(0xDEAD, opHash)), opHash);
         assertEq(validator.owners(address(accountA)), owner0);
     }
 
     function test_validateUserOp_burnedKeyFails() public {
         bytes32 h1 = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, h1, owner1)), h1);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, h1)), h1);
 
         bytes32 h2 = keccak256("op2");
         uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _sign(key0, h2, owner2)), h2
+            _op(address(accountA), _cd(owner2), _sign(key0, h2)), h2
         );
         assertEq(result, 1);
         assertEq(validator.owners(address(accountA)), owner1);
@@ -162,35 +167,30 @@ contract RotatingECDSAValidatorTest is Test {
 
     function test_keyBurned_evenIfExecutionFails() public {
         bytes32 opHash = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, opHash, owner1)), opHash);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, opHash)), opHash);
         assertEq(validator.owners(address(accountA)), owner1);
 
         uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _sign(key0, keccak256("op2"), owner2)), keccak256("op2")
+            _op(address(accountA), _cd(owner2), _sign(key0, keccak256("op2"))), keccak256("op2")
         );
         assertEq(result, 1);
     }
 
-    // --- malformed sigs ---
+    // --- malformed callData / next owner ---
 
-    function test_malformedSig_tooShort() public {
-        vm.expectRevert("RotatingECDSA: invalid sig length");
-        accountA.validateUserOp(_op(address(accountA), new bytes(64)), keccak256("op"));
-    }
-
-    function test_malformedSig_tooLong() public {
-        vm.expectRevert("RotatingECDSA: invalid sig length");
-        accountA.validateUserOp(_op(address(accountA), new bytes(86)), keccak256("op"));
-    }
-
-    function test_malformedSig_zeroNextOwner() public {
-        bytes32 opHash = keccak256("op1");
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            key0, MessageHashUtils.toEthSignedMessageHash(opHash)
+    function test_malformedCallData_tooShort() public {
+        vm.expectRevert("RotatingECDSA: calldata too short");
+        accountA.validateUserOp(
+            _op(address(accountA), hex"aabb", _sign(key0, keccak256("op"))),
+            keccak256("op")
         );
+    }
+
+    function test_malformedCallData_zeroNextOwner() public {
+        bytes32 opHash = keccak256("op1");
         vm.expectRevert("RotatingECDSA: zero next owner");
         accountA.validateUserOp(
-            _op(address(accountA), abi.encodePacked(r, s, v, address(0))), opHash
+            _op(address(accountA), _cd(address(0)), _sign(key0, opHash)), opHash
         );
     }
 
@@ -200,7 +200,7 @@ contract RotatingECDSAValidatorTest is Test {
         accountB.installValidator(abi.encode(owner2));
 
         bytes32 h = keccak256("op1");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, h, owner1)), h);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _sign(key0, h)), h);
 
         assertEq(validator.owners(address(accountA)), owner1);
         assertEq(validator.owners(address(accountB)), owner2);
@@ -248,7 +248,7 @@ contract RotatingECDSAValidatorTest is Test {
 
         bytes32 opHash = keccak256("fuzz");
         uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _sign(randomKey, opHash, owner1)), opHash
+            _op(address(accountA), _cd(owner1), _sign(randomKey, opHash)), opHash
         );
         assertEq(result, 1);
         assertEq(validator.owners(address(accountA)), owner0);
@@ -257,7 +257,7 @@ contract RotatingECDSAValidatorTest is Test {
     function testFuzz_rotationLandsOnNextOwner(address nextOwner) public {
         vm.assume(nextOwner != address(0));
         bytes32 opHash = keccak256("fuzz");
-        accountA.validateUserOp(_op(address(accountA), _sign(key0, opHash, nextOwner)), opHash);
+        accountA.validateUserOp(_op(address(accountA), _cd(nextOwner), _sign(key0, opHash)), opHash);
         assertEq(validator.owners(address(accountA)), nextOwner);
     }
 }
