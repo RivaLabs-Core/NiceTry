@@ -6,5 +6,5 @@ interface IWotsCVerifier {
         bytes calldata blob,
         bytes32 digest,
         address signer
-    ) external pure returns (bool);
+    ) external view returns (bool);
 }
