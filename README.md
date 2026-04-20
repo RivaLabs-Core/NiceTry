@@ -43,8 +43,6 @@ forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast
 
 ## Deployed addresses
 
-<!-- TODO: fill in -->
-
 | Network | Contract | Address |
 |---|---|---|
 | Sepolia | `SimpleAccountFactory` | `0x338fbbde8bacf9576cc435fd7496128ccc534d81` |
