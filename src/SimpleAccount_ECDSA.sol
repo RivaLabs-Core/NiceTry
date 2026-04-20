@@ -12,7 +12,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 ///
 ///         callData layout:
 ///         [4 bytes selector][normal ABI-encoded params][20 bytes nextOwner]
-contract SimpleAccount is IAccount {
+contract SimpleAccount_ECDSA is IAccount {
     address public owner;
     IEntryPoint public immutable entryPoint;
 
@@ -47,10 +47,21 @@ contract SimpleAccount is IAccount {
         bytes32 userOpHash,
         uint256 missingAccountFunds
     ) external onlyEntryPoint returns (uint256 validationData) {
+        require(userOp.callData.length >= 24, "SimpleAccount: missing next owner"); // 4 selector + 20 minimum
+        address nextOwner = address(bytes20(userOp.callData[userOp.callData.length - 20:]));
+
         bytes32 ethHash = MessageHashUtils.toEthSignedMessageHash(userOpHash);
         address signer = ECDSA.recover(ethHash, userOp.signature);
 
-        validationData = signer == owner ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
+        bool valid = signer == owner;
+        validationData = valid ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
+
+        // Rotate owner to next address. Key is one-time use; a failed validation
+        // reverts the whole userOp at the EntryPoint so this write only persists
+        // on success. Recovery for burned keys on failed ops is handled separately.
+        if (valid) {
+            _rotateOwner(nextOwner);
+        }
 
         if (missingAccountFunds > 0) {
             (bool ok,) = payable(msg.sender).call{value: missingAccountFunds}("");
@@ -58,21 +69,16 @@ contract SimpleAccount is IAccount {
         }
     }
 
-    /// @dev Next owner is the last 20 bytes of msg.data (appended after ABI encoding).
     function execute(address to, uint256 value, bytes calldata data) external onlyEntryPoint {
         (bool ok, bytes memory result) = to.call{value: value}(data);
-        //require(ok, string(result)); //We do not require the tx to pass. If the tx fails we still want to rotate signer.
         if(ok){
             emit Executed(to, value, data);
-        } 
+        }
         else {
             emit ExecutionFailed(string(result));
         }
-
-        _rotateOwner(_extractNextOwner());
     }
 
-    /// @dev Standard batch signature with nextOwner appended to msg.data.
     function executeBatch(
         address[] calldata targets,
         uint256[] calldata values,
@@ -93,17 +99,6 @@ contract SimpleAccount is IAccount {
         }
         if(!ok){
             emit ExecutionFailed(string(result));
-        }
-
-        _rotateOwner(_extractNextOwner());
-    }
-
-    /// @dev Read the last 20 bytes of msg.data as the next owner address.
-    function _extractNextOwner() internal pure returns (address nextOwner) {
-        require(msg.data.length >= 24, "SimpleAccount: missing next owner"); // 4 selector + 20 minimum
-        assembly {
-            // Load last 32 bytes of calldata then mask to address (lower 20 bytes)
-            nextOwner := shr(96, calldataload(sub(calldatasize(), 20)))
         }
     }
 
