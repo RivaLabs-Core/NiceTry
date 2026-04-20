@@ -1,27 +1,56 @@
 # NiceTry
- 
-NiceTry is a smart wallet infrastructure project. The first key feature is our original quantum safe design achieved through ephemeral key pairs and account abstraction.
- 
-## Achieving Quantum Safety Through Ephemeral Key Pairs and Account Abstraction
- 
-We designed a quantum-safe wallet design that requires no changes to Ethereum's signature schemes or protocol rules. By leveraging account abstraction, we make each ECDSA key pair single-use: every transaction rotates the signer while the smart contract wallet address remains constant. This eliminates long-term public key exposure, the core vulnerability that Shor's algorithm would exploit, using only today's infrastructure. This aims to solve, at least in the short term, quantum security on the execution layer.
- 
-<img src="images/image.png" width="750"/>
- 
-The solution has been described in greater details in our [Ethresearch introduction post](#). This [repo](#) currently provides a simple implementation of the design on Base Sepolia.
- 
-A live demo of our quantum-safe design is available here: [https://nicetry.xyz/](https://nicetry.xyz/)
 
-## Implementation
+Reference Solidity implementation of the NiceTry ephemeral-key smart wallet design.
 
-The rotation logic is implemented in two ways in this repo.
+> [!NOTE]
+> This repo contains contracts only. For the protocol specification see [NiceTry-Spec](https://github.com/RivaLabs-Core/ephemeral-keys). For a project overview, see [docs.nicetry.xyz](https://docs.nicetry.xyz/).
 
-### SimpleAccount
+## What this repo contains
 
-The original implementation is a standalone ERC-4337 smart account with rotation baked directly into the account contract. Each user deploys their own `SimpleAccount` instance. The account handles validation, execution, and key rotation internally — no external dependencies beyond the EntryPoint.
+Two Solidity implementations of the ECDSA ephemeral-key mode:
 
-### ERC-7579 Validator Module
+- **`SimpleAccount`** — a standalone ERC-4337 smart account with rotation baked into the account contract. Each user deploys their own instance. Validation, execution, and key rotation live in the same contract with no external dependencies beyond the EntryPoint.
 
-As an extension of the core design, the rotation logic is also available as a standalone ERC-7579 validator module compatible with Biconomy Nexus and any other ERC-7579 compliant smart account.
+- **`RotatingECDSAValidator`** — an ERC-7579 validator module. A single deployed module serves any number of ERC-7579 compliant accounts, each with independent key state. Use this when you already have a modular account and want to add rotation without redeploying.
 
-Rather than deploying a custom `SimpleAccount`, users can install the rotating validator on an existing modular account. A single deployed module instance serves any number of accounts, each with its own independent key state.
+Bundled vs. composable: pick `SimpleAccount` for a self-contained deployment, pick the validator module to extend an existing modular account.
+
+## Contract layout
+
+```
+src/
+├── SimpleAccount.sol          ERC-4337 account with rotation
+├── SimpleAccountFactory.sol   CREATE2 factory for SimpleAccount
+└── Module/
+    └── RotatingECDSAValidator.sol   ERC-7579 validator module
+```
+
+## Build and test
+
+```bash
+forge install
+forge build
+forge test
+```
+
+## Deploy
+
+Deployment script at `script/Deploy.s.sol`. Network configuration in `foundry.toml`.
+
+```bash
+forge script script/Deploy.s.sol --rpc-url <rpc> --broadcast
+```
+
+## Deployed addresses
+
+<!-- TODO: fill in -->
+
+| Network | Contract | Address |
+|---|---|---|
+| Sepolia | `SimpleAccountFactory` | `0x338fbbde8bacf9576cc435fd7496128ccc534d81` |
+
+## Related repos
+
+- [NiceTry-Spec](https://github.com/RivaLabs-Core/ephemeral-keys) — protocol specification and design rationale
+- [NiceTry-Wallet](https://github.com/RivaLabs-Core/NiceTry-Wallet) — standalone wallet demo with local key management
+- [NiceTry-Metamask](https://github.com/RivaLabs-Core/NiceTry-Metamask) — MetaMask integration demo
