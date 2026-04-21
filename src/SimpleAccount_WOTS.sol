@@ -5,6 +5,7 @@ import {IAccount} from "account-abstraction/interfaces/IAccount.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
+import {WOTS_BLOB_LEN} from "./WotsCVerifier.sol";
 
 /// @title SimpleAccount_WOTS
 /// @notice ERC-4337 smart account with WOTS+C post-quantum signature verification
@@ -15,7 +16,7 @@ import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
 ///         validated UserOp, the owner rotates to the next WOTS+C address.
 ///
 ///         userOp.signature layout:
-///         [468 bytes WOTS+C blob]
+///         [WOTS_BLOB_LEN bytes WOTS+C blob]
 ///
 ///         userOp.callData layout:
 ///         [4 bytes selector][normal ABI-encoded params][20 bytes nextOwner]
@@ -30,7 +31,6 @@ contract SimpleAccount_WOTS is IAccount {
 
     uint256 internal constant SIG_VALIDATION_SUCCESS = 0;
     uint256 internal constant SIG_VALIDATION_FAILED = 1;
-    uint256 internal constant WOTS_BLOB_LEN = 468;
 
     event WotsAccountInitialized(address indexed owner, address indexed verifier);
     event Executed(address indexed to, uint256 value, bytes data);
