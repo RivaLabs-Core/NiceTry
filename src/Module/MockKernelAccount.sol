@@ -2,15 +2,15 @@
 pragma solidity ^0.8.27;
 
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
-import {KernelRotatingECDSAValidator} from "src/Module/KernelRotatingECDSAValidator.sol";
+import {IKernelValidator} from "./IKernelValidator.sol";
 
-/// @dev Minimal Kernel v3.1-style account mock. Exercises the validator with
-///      the same payable call pattern a real Kernel account would use.
+/// @dev Minimal Kernel v3.1-style account mock. Exercises any IKernelValidator
+///      with the same payable call pattern a real Kernel account would use.
 contract MockKernelAccount {
-    KernelRotatingECDSAValidator public validator;
+    IKernelValidator public validator;
 
     constructor(address _validator) {
-        validator = KernelRotatingECDSAValidator(_validator);
+        validator = IKernelValidator(_validator);
     }
 
     function installValidator(bytes calldata initData) external payable {
