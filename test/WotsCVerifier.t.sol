@@ -383,4 +383,113 @@ contract WotsCVerifierTest is Test {
         assertEq(validationData, 1);            // rejected
         assertEq(account.owner(), k.addr);      // no rotation
     }
+
+    /// @dev Full backup-signer recovery: register a backup (real key), sign a
+    ///      rotateMainSigner userOp with it, validate + execute, and verify
+    ///      both the backup burn and main rotation landed.
+    function test_endToEnd_backupRecovery() public {
+        address ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+        vm.etch(ENTRYPOINT, hex"00");
+
+        SimpleAccountFactory factory = new SimpleAccountFactory(
+            IEntryPoint(ENTRYPOINT),
+            IWotsCVerifier(address(verifier))
+        );
+        address accountAddr = factory.createAccount(k.addr, 0, 1);
+        SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
+
+        // Derive a real backup key (different material).
+        WotsSigner.Key memory backup = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
+
+        // Register backup (direct call from EntryPoint — skipping the main-signed
+        // registration flow since this test focuses on the recovery side).
+        vm.prank(ENTRYPOINT);
+        account.rotateBackupSigner(address(0), backup.addr);
+        assertTrue(account.backupSigners(backup.addr));
+
+        address newMain = makeAddr("recoveredMain");
+
+        // callData = rotateMainSigner(backup.addr) || bytes20(newMain)
+        bytes memory callData = abi.encodePacked(
+            abi.encodeWithSelector(account.rotateMainSigner.selector, backup.addr),
+            bytes20(newMain)
+        );
+
+        bytes32 userOpHash = keccak256("recovery-op");
+        bytes memory sig = WotsSigner.sign(backup, userOpHash, bytes32(uint256(0xBADC0FFEE)));
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: accountAddr,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: "",
+            signature: sig
+        });
+
+        // Validate: should succeed and burn the backup.
+        vm.prank(ENTRYPOINT);
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 0);
+        assertFalse(account.backupSigners(backup.addr));
+        assertEq(account.backupSignerCount(), 0);
+        assertEq(account.owner(), k.addr); // main not rotated yet
+
+        // Execute: EntryPoint calls rotateMainSigner(backup.addr), which moves main.
+        vm.prank(ENTRYPOINT);
+        (bool ok,) = address(account).call(callData);
+        assertTrue(ok);
+        assertEq(account.owner(), newMain);
+    }
+
+    /// @dev Negative: a backup signer attempts to sign a non-rotateMainSigner
+    ///      userOp (e.g., a value-transferring execute). Validation must reject
+    ///      it, because validateUserOp's main-path verifier checks against the
+    ///      current main owner, which this backup's key doesn't derive to.
+    function test_endToEnd_backupCannotSignArbitraryCalls() public {
+        address ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+        vm.etch(ENTRYPOINT, hex"00");
+
+        SimpleAccountFactory factory = new SimpleAccountFactory(
+            IEntryPoint(ENTRYPOINT),
+            IWotsCVerifier(address(verifier))
+        );
+        address accountAddr = factory.createAccount(k.addr, 0, 1);
+        SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
+
+        WotsSigner.Key memory backup = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
+        vm.prank(ENTRYPOINT);
+        account.rotateBackupSigner(address(0), backup.addr);
+
+        // Backup tries to sign an `execute` call — selector does NOT match
+        // rotateMainSigner, so the account takes the main-signer path, verifies
+        // the blob against `owner` (which is k.addr, not backup.addr), and fails.
+        bytes memory callData = abi.encodePacked(
+            abi.encodeWithSelector(account.execute.selector, makeAddr("attacker"), uint256(1 ether), bytes("")),
+            bytes20(makeAddr("next"))
+        );
+        bytes32 userOpHash = keccak256("malicious");
+        bytes memory sig = WotsSigner.sign(backup, userOpHash, bytes32(uint256(0x123)));
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: accountAddr,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: "",
+            signature: sig
+        });
+
+        vm.prank(ENTRYPOINT);
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1);                     // rejected
+        assertEq(account.owner(), k.addr);               // no rotation
+        assertTrue(account.backupSigners(backup.addr));  // backup NOT burned
+    }
 }
