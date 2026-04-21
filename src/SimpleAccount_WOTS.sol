@@ -8,57 +8,58 @@ import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
 import {WOTS_BLOB_LEN} from "./WotsCVerifier.sol";
 
 /// @title SimpleAccount_WOTS
-/// @notice ERC-4337 smart account with WOTS+C post-quantum signature verification,
-///         automatic main-signer rotation, and a pool of pre-committed backup
-///         WOTS+C signers for recovery.
+/// @notice ERC-4337 smart account with WOTS+C post-quantum signatures,
+///         automatic main-signer rotation on every UserOp, and a pool of
+///         pre-committed spare keys.
 ///
-///         The "owner" is a WOTS+C address (derived from the WOTS public key),
-///         not an ECDSA address. Each signature is one-time use — after every
-///         validated UserOp, the owner rotates to the next WOTS+C address.
+///         Signer roles:
+///           - main owner: rotated on every successful UserOp via the last
+///             20 bytes of userOp.callData.
+///           - spare keys: pre-committed WOTS+C addresses registered by the
+///             main owner. Each spare key can sign ONE UserOp (arbitrary
+///             content). After use it is permanently tombstoned and can
+///             never be re-registered. Main still rotates via the callData
+///             tail when a spare key authorizes.
 ///
-///         Two signer roles:
-///           - main owner: signs any UserOp (execute, executeBatch, managing
-///             backups, etc.). Rotates on every successful UserOp.
-///           - backup signers: a pool of WOTS+C addresses registered by the
-///             main. Each backup can sign exactly one UserOp, and that UserOp
-///             MUST target `rotateMainSigner(address)` — nothing else. A
-///             successful backup validation burns that backup in the mapping
-///             (atomic with authorization, in validateUserOp) and the execute
-///             phase moves `owner` to the new main in `rotateMainSigner`.
+///         Authorization (unified, no selector dispatch):
+///           1. Recover signer from WOTS+C blob via VERIFIER.wrecover(sig, hash).
+///           2. If recovered == owner: authorized (main path).
+///           3. Else if spareKeys[recovered] == ACTIVE: authorized, transition
+///              to CONSUMED atomically.
+///           4. Else: reject.
+///           5. On authorized path, rotate main owner to callData's last 20 bytes.
 ///
-///         userOp.signature layout (both paths):
-///           [WOTS_BLOB_LEN bytes WOTS+C blob]
-///
-///         userOp.callData layout:
-///           main path:
-///             [4 bytes selector][normal ABI-encoded params][20 bytes nextOwner]
-///           backup path:
-///             [4 bytes rotateMainSigner.selector][abi.encoded(backupAddr)(32)][20 bytes nextOwner]
-///
-///         nextOwner MUST live in callData (which userOpHash commits to), not
-///         in signature — otherwise a relayer could rewrite it post-signing.
+///         userOp.signature = [WOTS_BLOB_LEN bytes WOTS+C blob]
+///         userOp.callData  = [... any call ...][20 bytes nextOwner]
 contract SimpleAccount_WOTS is IAccount {
+
+    // Spare-key state machine. Once CONSUMED or TOMBSTONED, an address can
+    // never be re-registered — protects against accidental reuse of a key
+    // whose history has leaked.
+    uint8 internal constant SPARE_NONE      = 0;
+    uint8 internal constant SPARE_ACTIVE    = 1;
+    uint8 internal constant SPARE_TOMBSTONE = 2;
 
     address public owner;
     IEntryPoint public immutable ENTRY_POINT;
     IWotsCVerifier public immutable VERIFIER;
 
-    // Pool of pre-committed WOTS+C backup signers. A non-zero entry means the
-    // address is authorized to sign exactly one main-signer rotation.
-    mapping(address => bool) public backupSigners;
-    uint256 public backupSignerCount;
+    // Pre-committed WOTS+C addresses authorized to sign one UserOp each.
+    // Value is one of SPARE_NONE / SPARE_ACTIVE / SPARE_TOMBSTONE.
+    mapping(address => uint8) public spareKeys;
+    uint256 public spareKeyCount;
 
     uint256 internal constant SIG_VALIDATION_SUCCESS = 0;
-    uint256 internal constant SIG_VALIDATION_FAILED = 1;
+    uint256 internal constant SIG_VALIDATION_FAILED  = 1;
 
     event WotsAccountInitialized(address indexed owner, address indexed verifier);
     event Executed(address indexed to, uint256 value, bytes data);
     event ExecutionFailed(string data);
     event OwnerRotated(address indexed previousOwner, address indexed newOwner);
-    event BackupSignerAdded(address indexed backup);
-    event BackupSignerRemoved(address indexed backup);
-    event BackupSignerReplaced(address indexed oldBackup, address indexed newBackup);
-    event MainSignerRecovered(address indexed fromBackup, address indexed previousMain, address indexed newMain);
+    event SpareKeyAdded(address indexed key);
+    event SpareKeyRemoved(address indexed key);         // admin-initiated
+    event SpareKeyReplaced(address indexed oldKey, address indexed newKey);
+    event SpareKeyConsumed(address indexed key);        // used by signature
 
     modifier onlyEntryPoint() {
         require(msg.sender == address(ENTRY_POINT), "WotsAccount: not from EntryPoint");
@@ -89,60 +90,27 @@ contract SimpleAccount_WOTS is IAccount {
 
         address nextOwner = address(bytes20(userOp.callData[userOp.callData.length - 20:]));
 
-        // Dispatch on the callData selector. If it targets rotateMainSigner,
-        // the authorized signer is a backup; otherwise it's the main owner.
-        bytes4 selector = bytes4(userOp.callData[0:4]);
-        if (selector == this.rotateMainSigner.selector) {
-            validationData = _validateBackupSignedUserOp(userOp, userOpHash);
+        address recovered = VERIFIER.wrecover(userOp.signature, userOpHash);
+
+        if (recovered == address(0)) {
+            validationData = SIG_VALIDATION_FAILED;
+        } else if (recovered == owner) {
+            _rotateOwner(nextOwner);
+            validationData = SIG_VALIDATION_SUCCESS;
+        } else if (spareKeys[recovered] == SPARE_ACTIVE) {
+            spareKeys[recovered] = SPARE_TOMBSTONE;
+            unchecked { spareKeyCount--; }
+            emit SpareKeyConsumed(recovered);
+            _rotateOwner(nextOwner);
+            validationData = SIG_VALIDATION_SUCCESS;
         } else {
-            validationData = _validateMainSignedUserOp(userOp, userOpHash, nextOwner);
+            validationData = SIG_VALIDATION_FAILED;
         }
 
         if (missingAccountFunds > 0) {
             (bool ok,) = payable(msg.sender).call{value: missingAccountFunds}("");
             require(ok, "WotsAccount: prefund failed");
         }
-    }
-
-    /// @dev Main-signer path: verify blob against current `owner`, rotate on success.
-    function _validateMainSignedUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        address nextOwner
-    ) internal returns (uint256) {
-        bool valid = VERIFIER.verify(userOp.signature, userOpHash, owner);
-        if (!valid) return SIG_VALIDATION_FAILED;
-
-        _rotateOwner(nextOwner);
-        return SIG_VALIDATION_SUCCESS;
-    }
-
-    /// @dev Backup-signer path: verify blob against a registered backup and
-    ///      burn that backup atomically with authorization. The main-signer
-    ///      rotation is performed later in `rotateMainSigner` (execute phase).
-    ///
-    ///      callData layout: [selector(4)][abi.encode(backupAddr)(32)][nextOwner(20)]
-    ///      The claimed `backupAddr` is committed to by userOpHash (it lives in
-    ///      callData), so the WOTS+C signature authenticates the full tuple.
-    function _validateBackupSignedUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash
-    ) internal returns (uint256) {
-        require(userOp.callData.length >= 56, "WotsAccount: bad backup calldata");
-        address backupAddr = address(bytes20(userOp.callData[16:36]));
-
-        if (!backupSigners[backupAddr]) return SIG_VALIDATION_FAILED;
-
-        bool valid = VERIFIER.verify(userOp.signature, userOpHash, backupAddr);
-        if (!valid) return SIG_VALIDATION_FAILED;
-
-        // Burn the backup atomically with authorization (Option B). The main
-        // owner will be updated in rotateMainSigner during the execute phase.
-        delete backupSigners[backupAddr];
-        unchecked { backupSignerCount--; }
-        emit BackupSignerRemoved(backupAddr);
-
-        return SIG_VALIDATION_SUCCESS;
     }
 
     function execute(address to, uint256 value, bytes calldata data) external onlyEntryPoint {
@@ -183,63 +151,37 @@ contract SimpleAccount_WOTS is IAccount {
     }
 
     // =========================================================================
-    // Backup-signer recovery
+    // Spare-key pool management
     // =========================================================================
 
-    /// @notice Main-signer rotation triggered by a backup signer. Only reachable
-    ///         via `validateUserOp`'s backup-signer path, which already verified
-    ///         the WOTS+C signature against `backupAddr` and burned it.
-    /// @dev    `backupAddr` is kept as a parameter purely for the event; the
-    ///         actual authorization and burn happened in validation.
-    ///
-    ///         New main address is read from msg.data's last 20 bytes, matching
-    ///         the `nextOwner` convention used everywhere else.
-    function rotateMainSigner(address backupAddr) external onlyEntryPoint {
-        address nextOwner;
-        assembly {
-            nextOwner := shr(96, calldataload(sub(calldatasize(), 20)))
-        }
-        require(nextOwner != address(0), "WotsAccount: zero next owner");
+    /// @notice Add, remove, or replace a spare key.
+    ///           - oldKey == 0, newKey != 0: add `newKey` (must be NONE)
+    ///           - oldKey != 0, newKey == 0: tombstone `oldKey` (must be ACTIVE)
+    ///           - oldKey != 0, newKey != 0: tombstone `oldKey`, add `newKey`
+    ///           - both zero: reverts
+    ///         Tombstoned and consumed addresses can never be re-added.
+    function rotateSpareKey(address oldKey, address newKey) external onlyEntryPoint {
+        require(oldKey != newKey, "WotsAccount: same address");
+        require(newKey != owner, "WotsAccount: owner cannot be spare");
 
-        address previous = owner;
-        owner = nextOwner;
-        emit OwnerRotated(previous, nextOwner);
-        emit MainSignerRecovered(backupAddr, previous, nextOwner);
-    }
-
-    /// @notice Add, remove, or replace a backup signer. Called by the main
-    ///         owner via a normal UserOp (validated through the main-signer
-    ///         path, which already rotates `owner` in `validateUserOp`).
-    ///
-    ///           - oldBackup == 0, newBackup != 0: add `newBackup`
-    ///           - oldBackup != 0, newBackup == 0: remove `oldBackup`
-    ///           - oldBackup != 0, newBackup != 0: replace `oldBackup` with `newBackup`
-    ///           - both zero: reverts (no-op, probably a caller bug)
-    function rotateBackupSigner(address oldBackup, address newBackup) external onlyEntryPoint {
-        require(oldBackup != newBackup, "WotsAccount: same backup address");
-        // Main and backup roles must be disjoint: registering the current owner
-        // as a backup would let main bypass the main-rotation path through
-        // rotateMainSigner, defeating the intended separation.
-        require(newBackup != owner, "WotsAccount: owner cannot be backup");
-
-        if (oldBackup != address(0)) {
-            require(backupSigners[oldBackup], "WotsAccount: old not registered");
-            delete backupSigners[oldBackup];
+        if (oldKey != address(0)) {
+            require(spareKeys[oldKey] == SPARE_ACTIVE, "WotsAccount: old not active");
+            spareKeys[oldKey] = SPARE_TOMBSTONE;
         }
 
-        if (newBackup != address(0)) {
-            require(!backupSigners[newBackup], "WotsAccount: new already registered");
-            backupSigners[newBackup] = true;
+        if (newKey != address(0)) {
+            require(spareKeys[newKey] == SPARE_NONE, "WotsAccount: new already touched");
+            spareKeys[newKey] = SPARE_ACTIVE;
         }
 
-        if (oldBackup == address(0)) {
-            unchecked { backupSignerCount++; }
-            emit BackupSignerAdded(newBackup);
-        } else if (newBackup == address(0)) {
-            unchecked { backupSignerCount--; }
-            emit BackupSignerRemoved(oldBackup);
+        if (oldKey == address(0)) {
+            unchecked { spareKeyCount++; }
+            emit SpareKeyAdded(newKey);
+        } else if (newKey == address(0)) {
+            unchecked { spareKeyCount--; }
+            emit SpareKeyRemoved(oldKey);
         } else {
-            emit BackupSignerReplaced(oldBackup, newBackup);
+            emit SpareKeyReplaced(oldKey, newKey);
         }
     }
 
