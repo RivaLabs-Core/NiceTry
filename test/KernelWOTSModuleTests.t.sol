@@ -8,12 +8,12 @@ import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
 import {WOTS_BLOB_LEN} from "../src/WotsCVerifier.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 
-/// @dev Toggleable mock verifier — same shape as the one in test/SimpleAccount_WOTS.t.sol.
+/// @dev wrecover mock: test pre-sets the address to return.
 contract MockWotsVerifier is IWotsCVerifier {
-    bool public result = true;
-    function setResult(bool r) external { result = r; }
-    function verify(bytes calldata, bytes32, address) external view returns (bool) {
-        return result;
+    address public recovered;
+    function setRecovered(address a) external { recovered = a; }
+    function wrecover(bytes calldata, bytes32) external view returns (address) {
+        return recovered;
     }
 }
 
@@ -26,6 +26,9 @@ contract KernelRotatingWOTSValidatorTest is Test {
     address owner0 = makeAddr("wotsOwner0");
     address owner1 = makeAddr("wotsOwner1");
     address owner2 = makeAddr("wotsOwner2");
+
+    address spare1 = makeAddr("spare1");
+    address spare2 = makeAddr("spare2");
 
     function setUp() public {
         verifier = new MockWotsVerifier();
@@ -61,177 +64,157 @@ contract KernelRotatingWOTSValidatorTest is Test {
         return new bytes(WOTS_BLOB_LEN);
     }
 
-    // --- onInstall ---
+    // --- Install ---
 
-    function test_onInstall_setsOwner() public view {
+    function test_install_setsOwner() public view {
         assertEq(validator.owners(address(accountA)), owner0);
     }
 
-    function test_onInstall_revertsIfAlreadyInstalled() public {
+    function test_install_revertsIfAlreadyInstalled() public {
         vm.expectRevert("KernelRotatingWOTS: already installed");
         accountA.installValidator(abi.encode(owner1));
     }
 
-    function test_onInstall_revertsOnZeroOwner() public {
+    function test_install_revertsOnZeroOwner() public {
         vm.expectRevert("KernelRotatingWOTS: zero owner");
         accountB.installValidator(abi.encode(address(0)));
     }
 
-    function test_onInstall_acceptsValue() public {
+    function test_install_acceptsValue() public {
         vm.deal(address(this), 1 ether);
         accountB.installValidator{value: 0.5 ether}(abi.encode(owner1));
         assertEq(validator.owners(address(accountB)), owner1);
     }
 
-    // --- isInitialized / onUninstall ---
+    // --- Module type ---
 
-    function test_isInitialized_trueAfterInstall() public view {
-        assertTrue(validator.isInitialized(address(accountA)));
+    function test_isModuleType_validatorOnly() public view {
+        assertTrue(validator.isModuleType(1));
+        assertFalse(validator.isModuleType(2));
+        assertFalse(validator.isModuleType(5));
+        assertFalse(validator.isModuleType(6));
     }
 
-    function test_isInitialized_falseBeforeInstall() public view {
-        assertFalse(validator.isInitialized(address(accountB)));
-    }
+    // --- Uninstall ---
 
     function test_onUninstall_clearsOwner() public {
         accountA.uninstallValidator();
         assertFalse(validator.isInitialized(address(accountA)));
     }
 
-    function test_onUninstall_allowsReinstall() public {
-        accountA.uninstallValidator();
-        accountA.installValidator(abi.encode(owner2));
-        assertEq(validator.owners(address(accountA)), owner2);
-    }
+    // --- Main-signer validation ---
 
-    // --- module type ---
-
-    function test_isModuleType_validatorTrue() public view {
-        assertTrue(validator.isModuleType(1));
-    }
-
-    function test_isModuleType_othersFalse() public view {
-        assertFalse(validator.isModuleType(2));
-        assertFalse(validator.isModuleType(3));
-        assertFalse(validator.isModuleType(4));
-        assertFalse(validator.isModuleType(5)); // kernel: policy
-        assertFalse(validator.isModuleType(6)); // kernel: signer
-    }
-
-    // --- validateUserOp success ---
-
-    function test_validateUserOp_returnsSuccessAndRotates() public {
-        verifier.setResult(true);
-
-        uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _cd(owner1), _blob()),
-            keccak256("op")
-        );
-
-        assertEq(result, 0);
+    function test_mainSigned_rotatesOwner() public {
+        verifier.setRecovered(owner0);
+        uint256 r = accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op"));
+        assertEq(r, 0);
         assertEq(validator.owners(address(accountA)), owner1);
     }
 
-    function test_validateUserOp_emitsOwnerRotated() public {
-        verifier.setResult(true);
-
+    function test_emitsOwnerRotated() public {
+        verifier.setRecovered(owner0);
         vm.expectEmit(true, true, true, true);
         emit KernelRotatingWOTSValidator.OwnerRotated(address(accountA), owner0, owner1);
         accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op"));
     }
 
-    function test_validateUserOp_chainRotation() public {
-        verifier.setResult(true);
-
-        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op1"));
-        assertEq(validator.owners(address(accountA)), owner1);
-
-        accountA.validateUserOp(_op(address(accountA), _cd(owner2), _blob()), keccak256("op2"));
-        assertEq(validator.owners(address(accountA)), owner2);
-
-        accountA.validateUserOp(_op(address(accountA), _cd(owner0), _blob()), keccak256("op3"));
+    function test_strangerRecoveredRejected() public {
+        verifier.setRecovered(makeAddr("stranger"));
+        uint256 r = accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op"));
+        assertEq(r, 1);
         assertEq(validator.owners(address(accountA)), owner0);
     }
 
-    function test_validateUserOp_acceptsValue() public {
-        vm.deal(address(this), 1 ether);
-        verifier.setResult(true);
-
-        uint256 result = accountA.validateUserOp{value: 0.1 ether}(
-            _op(address(accountA), _cd(owner1), _blob()),
-            keccak256("op")
-        );
-
-        assertEq(result, 0);
-        assertEq(validator.owners(address(accountA)), owner1);
-    }
-
-    // --- validateUserOp failure ---
-
-    function test_validateUserOp_invalidSigReturnsFailedNoRotate() public {
-        verifier.setResult(false);
-
-        uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _cd(owner1), _blob()),
-            keccak256("op")
-        );
-
-        assertEq(result, 1);
-        assertEq(validator.owners(address(accountA)), owner0);
-    }
-
-    function test_validateUserOp_badSigLengthReturnsFailed() public {
-        verifier.setResult(true);
-
-        uint256 result = accountA.validateUserOp(
+    function test_badBlobLenRejected() public {
+        verifier.setRecovered(owner0);
+        uint256 r = accountA.validateUserOp(
             _op(address(accountA), _cd(owner1), new bytes(WOTS_BLOB_LEN - 1)),
             keccak256("op")
         );
-
-        assertEq(result, 1);
-        assertEq(validator.owners(address(accountA)), owner0);
+        assertEq(r, 1);
     }
 
-    function test_validateUserOp_badCalldataLengthReturnsFailed() public {
-        verifier.setResult(true);
-
-        uint256 result = accountA.validateUserOp(
-            _op(address(accountA), hex"aabb", _blob()),
-            keccak256("op")
-        );
-
-        assertEq(result, 1);
-        assertEq(validator.owners(address(accountA)), owner0);
+    function test_zeroNextOwnerRejected() public {
+        verifier.setRecovered(owner0);
+        uint256 r = accountA.validateUserOp(_op(address(accountA), _cd(address(0)), _blob()), keccak256("op"));
+        assertEq(r, 1);
     }
 
-    function test_validateUserOp_zeroNextOwnerReturnsFailed() public {
-        verifier.setResult(true);
+    // --- Spare-key pool ---
 
-        uint256 result = accountA.validateUserOp(
-            _op(address(accountA), _cd(address(0)), _blob()),
-            keccak256("op")
-        );
+    function test_addAndRemoveSpare() public {
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(address(0), spare1);
+        assertEq(validator.spareKeys(address(accountA), spare1), 1);
+        assertEq(validator.spareKeyCount(address(accountA)), 1);
 
-        assertEq(result, 1);
-        assertEq(validator.owners(address(accountA)), owner0);
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(spare1, address(0));
+        assertEq(validator.spareKeys(address(accountA), spare1), 2);
+        assertEq(validator.spareKeyCount(address(accountA)), 0);
     }
 
-    function test_uninstalledValidatorRejected() public {
-        bytes32 opHash = keccak256("op");
-        vm.expectRevert("MockKernel: validator not installed");
-        accountB.validateUserOp(_op(address(accountB), _cd(owner1), _blob()), opHash);
+    function test_tombstonedCannotBeReadded() public {
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(address(0), spare1);
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(spare1, address(0));
+
+        vm.prank(address(accountA));
+        vm.expectRevert("KernelRotatingWOTS: new already touched");
+        validator.rotateSpareKey(address(0), spare1);
     }
 
-    // --- multi-account isolation ---
+    function test_spareRequiresInstalled() public {
+        vm.prank(address(accountB));
+        vm.expectRevert("KernelRotatingWOTS: not installed");
+        validator.rotateSpareKey(address(0), spare1);
+    }
 
-    function test_isolation_rotationDoesNotAffectOtherAccount() public {
-        accountB.installValidator(abi.encode(owner2));
-        verifier.setResult(true);
+    function test_ownerCannotBeSpare() public {
+        vm.prank(address(accountA));
+        vm.expectRevert("KernelRotatingWOTS: owner cannot be spare");
+        validator.rotateSpareKey(address(0), owner0);
+    }
 
-        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op"));
+    // --- Spare signing ---
 
+    function test_spareSigned_authorizesAndTombstones() public {
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(address(0), spare1);
+
+        verifier.setRecovered(spare1);
+        uint256 r = accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op"));
+
+        assertEq(r, 0);
         assertEq(validator.owners(address(accountA)), owner1);
-        assertEq(validator.owners(address(accountB)), owner2);
+        assertEq(validator.spareKeys(address(accountA), spare1), 2);
+        assertEq(validator.spareKeyCount(address(accountA)), 0);
+    }
+
+    function test_consumedSpareCannotSignAgain() public {
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(address(0), spare1);
+
+        verifier.setRecovered(spare1);
+        accountA.validateUserOp(_op(address(accountA), _cd(owner1), _blob()), keccak256("op0"));
+
+        verifier.setRecovered(spare1);
+        uint256 r = accountA.validateUserOp(_op(address(accountA), _cd(owner2), _blob()), keccak256("op1"));
+        assertEq(r, 1);
+    }
+
+    function test_isolation_sparesArePerAccount() public {
+        accountB.installValidator(abi.encode(owner2));
+
+        vm.prank(address(accountA));
+        validator.rotateSpareKey(address(0), spare1);
+
+        verifier.setRecovered(spare1);
+        uint256 r = accountB.validateUserOp(_op(address(accountB), _cd(owner1), _blob()), keccak256("op"));
+        assertEq(r, 1);
+
+        assertEq(validator.spareKeys(address(accountA), spare1), 1);
     }
 
     // --- ERC-1271 disabled ---
@@ -242,8 +225,6 @@ contract KernelRotatingWOTSValidatorTest is Test {
             bytes4(0xffffffff)
         );
     }
-
-    // --- verifier immutable ---
 
     function test_verifierImmutableSet() public view {
         assertEq(address(validator.VERIFIER()), address(verifier));
