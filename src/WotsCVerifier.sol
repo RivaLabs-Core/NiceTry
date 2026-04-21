@@ -84,12 +84,13 @@ contract WotsCVerifier is IWotsCVerifier {
     uint256 public constant TARGET_SUM = WOTS_TARGET_SUM;
     uint256 public constant BLOB_LEN   = WOTS_BLOB_LEN;
 
-    function verify(
+    /// @notice Recovers the WOTS+C signer address from a blob + digest.
+    ///         Returns address(0) on bad blob length or failed checksum.
+    function wrecover(
         bytes calldata blob,
-        bytes32 digest,
-        address signer
-    ) external pure returns (bool) {
-        if (blob.length != WOTS_BLOB_LEN) return false;
+        bytes32 digest
+    ) external pure returns (address) {
+        if (blob.length != WOTS_BLOB_LEN) return address(0);
 
         // Solidity inline assembly only accepts "direct number constants" —
         // literal numerics or references to them. Derived constants need to
@@ -124,7 +125,7 @@ contract WotsCVerifier is IWotsCVerifier {
             uint256 digit = (uint256(h) >> (WOTS_DIGIT_SHIFT_0 - i * WOTS_W_BITS)) & WOTS_W_MASK;
             sum += digit;
         }
-        if (sum != WOTS_TARGET_SUM) return false;
+        if (sum != WOTS_TARGET_SUM) return address(0);
 
         bytes32 pkHash;
         assembly {
@@ -151,6 +152,6 @@ contract WotsCVerifier is IWotsCVerifier {
             pkHash := keccak256(WOTS_PK_MEM, sigData)
         }
 
-        return address(uint160(uint256(pkHash))) == signer;
+        return address(uint160(uint256(pkHash)));
     }
 }
