@@ -156,21 +156,21 @@ contract WotsCVerifierTest is Test {
         bytes memory blob = WotsSigner.sign(k, digest, bytes32(uint256(0xABCD)));
 
         assertEq(blob.length, WOTS_BLOB_LEN);
-        assertTrue(verifier.verify(blob, digest, k.addr));
+        assertEq(verifier.wrecover(blob, digest), k.addr);
     }
 
     function test_verify_wrongSigner_fails() public {
         bytes32 digest = keccak256("hello world");
         bytes memory blob = WotsSigner.sign(k, digest, bytes32(uint256(0xABCD)));
 
-        assertFalse(verifier.verify(blob, digest, makeAddr("notOwner")));
+        assertTrue(verifier.wrecover(blob, digest) != makeAddr("notOwner"));
     }
 
     function test_verify_wrongDigest_fails() public {
         bytes32 digest = keccak256("hello world");
         bytes memory blob = WotsSigner.sign(k, digest, bytes32(uint256(0xABCD)));
 
-        assertFalse(verifier.verify(blob, keccak256("different message"), k.addr));
+        assertTrue(verifier.wrecover(blob, keccak256("different message")) != k.addr);
     }
 
     function test_verify_tamperedBlob_fails() public {
@@ -179,14 +179,14 @@ contract WotsCVerifierTest is Test {
 
         // Flip one bit in the chain portion
         blob[10] ^= bytes1(uint8(0x01));
-        assertFalse(verifier.verify(blob, digest, k.addr));
+        assertTrue(verifier.wrecover(blob, digest) != k.addr);
     }
 
     function test_verify_wrongBlobLength_fails() public {
         bytes memory tooShort = new bytes(467);
         bytes memory tooLong = new bytes(469);
-        assertFalse(verifier.verify(tooShort, bytes32(0), k.addr));
-        assertFalse(verifier.verify(tooLong, bytes32(0), k.addr));
+        assertEq(verifier.wrecover(tooShort, bytes32(0)), address(0));
+        assertEq(verifier.wrecover(tooLong, bytes32(0)), address(0));
     }
 
     function test_verify_multipleSignaturesSameKey() public {
@@ -198,8 +198,8 @@ contract WotsCVerifierTest is Test {
         bytes memory b1 = WotsSigner.sign(k, d1, bytes32(uint256(1)));
         bytes memory b2 = WotsSigner.sign(k, d2, bytes32(uint256(2)));
 
-        assertTrue(verifier.verify(b1, d1, k.addr));
-        assertTrue(verifier.verify(b2, d2, k.addr));
+        assertEq(verifier.wrecover(b1, d1), k.addr);
+        assertEq(verifier.wrecover(b2, d2), k.addr);
     }
 
     function test_derive_deterministic() public pure {
@@ -242,15 +242,15 @@ contract WotsCVerifierTest is Test {
             bytes memory blob = WotsSigner.sign(k, digest, bytes32(i));
 
             uint256 before = gasleft();
-            bool ok = verifier.verify(blob, digest, k.addr);
+            address rec = verifier.wrecover(blob, digest);
             uint256 used = before - gasleft();
 
-            require(ok, "gas: verify returned false");
+            require(rec == k.addr, "gas: wrecover mismatch");
             totalGas += used;
         }
 
         uint256 avg = totalGas / N;
-        console.log("WotsCVerifier.verify avg gas (N=5):", avg);
+        console.log("WotsCVerifier.wrecover avg gas (N=5):", avg);
     }
 
     /// @dev Single-shot measurement for a deterministic signature (useful as a
@@ -262,11 +262,11 @@ contract WotsCVerifierTest is Test {
         bytes memory blob = WotsSigner.sign(k, digest, bytes32(uint256(0xFEED)));
 
         uint256 before = gasleft();
-        bool ok = verifier.verify(blob, digest, k.addr);
+        address rec = verifier.wrecover(blob, digest);
         uint256 used = before - gasleft();
 
-        require(ok, "gas: verify returned false");
-        console.log("WotsCVerifier.verify one-shot gas:", used);
+        require(rec == k.addr, "gas: wrecover mismatch");
+        console.log("WotsCVerifier.wrecover one-shot gas:", used);
     }
 
     /// @dev End-to-end validateUserOp gas (verifier + account rotation + event).
@@ -396,10 +396,9 @@ contract WotsCVerifierTest is Test {
         assertEq(account.owner(), k.addr);      // no rotation
     }
 
-    /// @dev Full backup-signer recovery: register a backup (real key), sign a
-    ///      rotateMainSigner userOp with it, validate + execute, and verify
-    ///      both the backup burn and main rotation landed.
-    function test_endToEnd_backupRecovery() public {
+    /// @dev Spare key signs an arbitrary execute userOp. Main rotates to
+    ///      nextOwner from callData tail, spare is tombstoned.
+    function test_endToEnd_spareSignsAnyUserOp() public {
         address ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
         vm.etch(ENTRYPOINT, hex"00");
 
@@ -410,25 +409,19 @@ contract WotsCVerifierTest is Test {
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
 
-        // Derive a real backup key (different material).
-        WotsSigner.Key memory backup = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
+        WotsSigner.Key memory spare = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
 
-        // Register backup (direct call from EntryPoint — skipping the main-signed
-        // registration flow since this test focuses on the recovery side).
+        // Register spare via EntryPoint
         vm.prank(ENTRYPOINT);
-        account.rotateBackupSigner(address(0), backup.addr);
-        assertTrue(account.backupSigners(backup.addr));
+        account.rotateSpareKey(address(0), spare.addr);
 
-        address newMain = makeAddr("recoveredMain");
-
-        // callData = rotateMainSigner(backup.addr) || bytes20(newMain)
+        address newMain = makeAddr("newMain");
         bytes memory callData = abi.encodePacked(
-            abi.encodeWithSelector(account.rotateMainSigner.selector, backup.addr),
+            abi.encodeWithSelector(account.execute.selector, makeAddr("target"), uint256(0), bytes("")),
             bytes20(newMain)
         );
-
-        bytes32 userOpHash = keccak256("recovery-op");
-        bytes memory sig = WotsSigner.sign(backup, userOpHash, bytes32(uint256(0xBADC0FFEE)));
+        bytes32 userOpHash = keccak256("spare-op");
+        bytes memory sig = WotsSigner.sign(spare, userOpHash, bytes32(uint256(0xBADC0FFEE)));
 
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: accountAddr,
@@ -442,26 +435,17 @@ contract WotsCVerifierTest is Test {
             signature: sig
         });
 
-        // Validate: should succeed and burn the backup.
         vm.prank(ENTRYPOINT);
         uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
         assertEq(validationData, 0);
-        assertFalse(account.backupSigners(backup.addr));
-        assertEq(account.backupSignerCount(), 0);
-        assertEq(account.owner(), k.addr); // main not rotated yet
-
-        // Execute: EntryPoint calls rotateMainSigner(backup.addr), which moves main.
-        vm.prank(ENTRYPOINT);
-        (bool ok,) = address(account).call(callData);
-        assertTrue(ok);
         assertEq(account.owner(), newMain);
+        assertEq(account.spareKeys(spare.addr), 2); // tombstoned
+        assertEq(account.spareKeyCount(), 0);
     }
 
-    /// @dev Negative: a backup signer attempts to sign a non-rotateMainSigner
-    ///      userOp (e.g., a value-transferring execute). Validation must reject
-    ///      it, because validateUserOp's main-path verifier checks against the
-    ///      current main owner, which this backup's key doesn't derive to.
-    function test_endToEnd_backupCannotSignArbitraryCalls() public {
+    /// @dev After a spare is consumed, the same key re-signing is rejected
+    ///      (state transitioned ACTIVE → TOMBSTONE).
+    function test_endToEnd_consumedSpareRejected() public {
         address ENTRYPOINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
         vm.etch(ENTRYPOINT, hex"00");
 
@@ -472,19 +456,20 @@ contract WotsCVerifierTest is Test {
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
 
-        WotsSigner.Key memory backup = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
+        WotsSigner.Key memory spare = WotsSigner.derive(bytes32(uint256(0xBAC_1DEA)));
         vm.prank(ENTRYPOINT);
-        account.rotateBackupSigner(address(0), backup.addr);
+        account.rotateSpareKey(address(0), spare.addr);
 
-        // Backup tries to sign an `execute` call — selector does NOT match
-        // rotateMainSigner, so the account takes the main-signer path, verifies
-        // the blob against `owner` (which is k.addr, not backup.addr), and fails.
+        // First op succeeds
+        _runSpareOp(account, spare, makeAddr("newMain1"), bytes32(uint256(1)), keccak256("op1"), ENTRYPOINT);
+
+        // Second op with same spare — rejected
         bytes memory callData = abi.encodePacked(
-            abi.encodeWithSelector(account.execute.selector, makeAddr("attacker"), uint256(1 ether), bytes("")),
-            bytes20(makeAddr("next"))
+            abi.encodeWithSelector(account.execute.selector, makeAddr("t2"), uint256(0), bytes("")),
+            bytes20(makeAddr("newMain2"))
         );
-        bytes32 userOpHash = keccak256("malicious");
-        bytes memory sig = WotsSigner.sign(backup, userOpHash, bytes32(uint256(0x123)));
+        bytes32 userOpHash = keccak256("op2");
+        bytes memory sig = WotsSigner.sign(spare, userOpHash, bytes32(uint256(2)));
 
         PackedUserOperation memory userOp = PackedUserOperation({
             sender: accountAddr,
@@ -500,8 +485,35 @@ contract WotsCVerifierTest is Test {
 
         vm.prank(ENTRYPOINT);
         uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
-        assertEq(validationData, 1);                     // rejected
-        assertEq(account.owner(), k.addr);               // no rotation
-        assertTrue(account.backupSigners(backup.addr));  // backup NOT burned
+        assertEq(validationData, 1);
+    }
+
+    function _runSpareOp(
+        SimpleAccount_WOTS acc,
+        WotsSigner.Key memory spare,
+        address newMain,
+        bytes32 r,
+        bytes32 userOpHash,
+        address ep
+    ) internal {
+        bytes memory callData = abi.encodePacked(
+            abi.encodeWithSelector(acc.execute.selector, makeAddr("t1"), uint256(0), bytes("")),
+            bytes20(newMain)
+        );
+        bytes memory sig = WotsSigner.sign(spare, userOpHash, r);
+        PackedUserOperation memory op = PackedUserOperation({
+            sender: address(acc),
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.prank(ep);
+        uint256 rv = acc.validateUserOp(op, userOpHash, 0);
+        assertEq(rv, 0);
     }
 }
