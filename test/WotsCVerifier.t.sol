@@ -215,6 +215,18 @@ contract WotsCVerifierTest is Test {
     }
 
     // =========================================================================
+    // Public parameter getters — readable by off-chain signers via ABI
+    // =========================================================================
+
+    function test_params_matchFileLevelConstants() public view {
+        assertEq(verifier.W_BITS(),     WOTS_W_BITS);
+        assertEq(verifier.N(),          WOTS_N);
+        assertEq(verifier.L(),          WOTS_L);
+        assertEq(verifier.TARGET_SUM(), WOTS_TARGET_SUM);
+        assertEq(verifier.BLOB_LEN(),   WOTS_BLOB_LEN);
+    }
+
+    // =========================================================================
     // Gas measurement
     // =========================================================================
 

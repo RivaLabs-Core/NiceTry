@@ -71,6 +71,19 @@ uint256 constant WOTS_PK_MEM         = 0x200;              // pk-accumulator bas
  */
 contract WotsCVerifier is IWotsCVerifier {
 
+    // --- Public parameters (ABI-readable) ---
+    //
+    // Minimum an off-chain signer needs to reproduce a signature: W_BITS, N, L.
+    // TARGET_SUM is exposed because the default (L*(W-1)/2) is technically
+    // overridable in WotsParams. BLOB_LEN is exposed as a sanity-check
+    // convenience — derivable from W_BITS/N/L but useful to assert against.
+
+    uint256 public constant W_BITS     = WOTS_W_BITS;
+    uint256 public constant N          = WOTS_N;
+    uint256 public constant L          = WOTS_L;
+    uint256 public constant TARGET_SUM = WOTS_TARGET_SUM;
+    uint256 public constant BLOB_LEN   = WOTS_BLOB_LEN;
+
     function verify(
         bytes calldata blob,
         bytes32 digest,
