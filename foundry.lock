@@ -1,0 +1,8 @@
+{
+  "lib\\kernel": {
+    "tag": {
+      "name": "v1.0.1",
+      "rev": "e2041f376c970fd451a8ad8177268f106a7faca2"
+    }
+  }
+}

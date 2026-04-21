@@ -14,7 +14,8 @@ docs/
 # Dotenv file
 .env
 
-lib/
+lib/*
+!lib/kernel
 node_modules/
 deployCommands.txt
 abi/
