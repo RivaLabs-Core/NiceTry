@@ -20,8 +20,10 @@ contract Deploy is Script {
         );
 
         console.log("WotsCVerifier deployed at:", address(verifier));
-        console.log("Factory deployed at:", address(factory));
-        console.log("EntryPoint:", ENTRYPOINT_V07);
+        console.log("Factory deployed at:        ", address(factory));
+        console.log("  ECDSA implementation at:  ", factory.ECDSA_IMPL());
+        console.log("  WOTS  implementation at:  ", factory.WOTS_IMPL());
+        console.log("EntryPoint:                 ", ENTRYPOINT_V07);
 
         vm.stopBroadcast();
     }
