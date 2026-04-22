@@ -4,5 +4,11 @@
       "name": "v1.0.1",
       "rev": "e2041f376c970fd451a8ad8177268f106a7faca2"
     }
+  },
+  "lib\\nexus": {
+    "tag": {
+      "name": "v1.2.0",
+      "rev": "8db1a6e41780dd0cc85298b0cbe6ab493adc6bb5"
+    }
   }
 }

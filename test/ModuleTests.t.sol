@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {RotatingECDSAValidator} from "../src/Module/RotatingECDSAValidator.sol";
 import {MockNexusAccount} from "../src/Module/MockNexusAccount.sol";
-import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract RotatingECDSAValidatorTest is Test {
