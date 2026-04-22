@@ -69,6 +69,9 @@ contract SimpleAccount_WOTS is IAccount {
     constructor(IEntryPoint _entryPoint, IWotsCVerifier _verifier) {
         ENTRY_POINT = _entryPoint;
         VERIFIER = _verifier;
+        // Lock the implementation itself against initialize().
+        // Proxies delegatecall in and have their own (zero) owner slot.
+        owner = address(this);
     }
 
     /// @dev Called once by the factory after clone deployment

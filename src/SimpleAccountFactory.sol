@@ -5,66 +5,54 @@ import {SimpleAccount_ECDSA} from "./SimpleAccount_ECDSA.sol";
 import {SimpleAccount_WOTS} from "./SimpleAccount_WOTS.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
+import {LibClone} from "solady/utils/LibClone.sol";
 
+/// @title SimpleAccountFactory
+/// @notice Deploys per-user accounts as EIP-1167 minimal proxies pointing at
+///         per-mode implementation contracts. Implementations are deployed
+///         once in this factory's constructor.
 contract SimpleAccountFactory {
     IEntryPoint public immutable ENTRY_POINT;
     IWotsCVerifier public immutable WOTS_VERIFIER;
+
+    address public immutable ECDSA_IMPL;
+    address public immutable WOTS_IMPL;
 
     event AccountCreated(address indexed account, address indexed owner, uint256 salt);
 
     constructor(IEntryPoint _entryPoint, IWotsCVerifier _wotsVerifier) {
         ENTRY_POINT = _entryPoint;
         WOTS_VERIFIER = _wotsVerifier;
+        ECDSA_IMPL = address(new SimpleAccount_ECDSA(_entryPoint));
+        WOTS_IMPL = address(new SimpleAccount_WOTS(_entryPoint, _wotsVerifier));
     }
 
-    function createAccount(address owner, uint256 salt, uint8 mode) external returns (address) {
-        address predicted = getAddress(owner, salt, mode);
+    function createAccount(address owner, uint256 salt, uint8 mode) external returns (address accountAddr) {
+        address impl = _implFor(mode);
+        bytes32 fullSalt = _salt(owner, salt);
+
+        address predicted = LibClone.predictDeterministicAddress(impl, fullSalt, address(this));
         if (predicted.code.length > 0) return predicted;
 
-
-        bytes32 fullSalt = _salt(owner, salt);
-        address accountAddr;
-        if(mode == 0){
-            SimpleAccount_ECDSA account = new SimpleAccount_ECDSA{salt: fullSalt}(ENTRY_POINT);
-            account.initialize(owner);
-            accountAddr = address(account);
-        } else if (mode == 1){
-            SimpleAccount_WOTS account = new SimpleAccount_WOTS{salt: fullSalt}(ENTRY_POINT, WOTS_VERIFIER);
-            account.initialize(owner);
-            accountAddr = address(account);
+        accountAddr = LibClone.cloneDeterministic(impl, fullSalt);
+        if (mode == 0) {
+            SimpleAccount_ECDSA(payable(accountAddr)).initialize(owner);
         } else {
-            revert("SimpleAccountFactory: invalid mode");
+            SimpleAccount_WOTS(payable(accountAddr)).initialize(owner);
         }
 
         emit AccountCreated(accountAddr, owner, salt);
-        return accountAddr;
     }
 
     function getAddress(address owner, uint256 salt, uint8 mode) public view returns (address) {
-        bytes32 fullSalt = _salt(owner, salt);
-        if(mode == 0){
-            return address(uint160(uint256(keccak256(abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                fullSalt,
-                keccak256(abi.encodePacked(
-                    type(SimpleAccount_ECDSA).creationCode,
-                    abi.encode(ENTRY_POINT)
-                ))
-            )))));
-        } else if (mode == 1) {
-            return address(uint160(uint256(keccak256(abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                fullSalt,
-                keccak256(abi.encodePacked(
-                    type(SimpleAccount_WOTS).creationCode,
-                    abi.encode(ENTRY_POINT, WOTS_VERIFIER)
-                ))
-            )))));
-        } else {
-            revert("SimpleAccountFactory: invalid mode");
-        }
+        address impl = _implFor(mode);
+        return LibClone.predictDeterministicAddress(impl, _salt(owner, salt), address(this));
+    }
+
+    function _implFor(uint8 mode) internal view returns (address) {
+        if (mode == 0) return ECDSA_IMPL;
+        if (mode == 1) return WOTS_IMPL;
+        revert("SimpleAccountFactory: invalid mode");
     }
 
     function _salt(address owner, uint256 salt) internal pure returns (bytes32) {
