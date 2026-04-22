@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
-import {RotatingECDSAValidator} from "src/Module/RotatingECDSAValidator.sol";
+import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
+import {IValidator} from "./IERC7579.sol";
 
 contract MockNexusAccount {
-    RotatingECDSAValidator public validator;
+    IValidator public validator;
 
     constructor(address _validator) {
-        validator = RotatingECDSAValidator(_validator);
+        validator = IValidator(_validator);
     }
 
     function installValidator(bytes calldata initData) external {
