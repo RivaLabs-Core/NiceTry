@@ -8,8 +8,9 @@ out/
 /broadcast/**/dry-run/
 broadcast/
 
-# Docs
-docs/
+# Docs (forge-doc output) — but keep hand-written notes
+docs/*
+!docs/fors-parameters.md
 
 # Dotenv file
 .env

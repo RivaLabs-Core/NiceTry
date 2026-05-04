@@ -4,12 +4,25 @@ pragma solidity ^0.8.24;
 import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
 
 /*
- * Standalone FORS signature verifier (JARDIN-family Keccak variant).
+ * Standalone FORS+C signature verifier (JARDIN-family Keccak variant).
  *
  * FORS-only post-quantum few-time signature scheme using the same hash
  * primitives, ADRS layout, and 16-byte hash truncation as the FORS sub-
  * component of our SLH-DSA-Keccak-128-24 SphincsVerifier. No XMSS
  * hypertree above — the public key is the FORS roots compression alone.
+ *
+ * The +C variant (Hülsing–Kudinov–Ronen–Yogev, 2023; see also Kudinov–Nick
+ * 2025-12-05 "Hash-based Signature Schemes for Bitcoin", §9.2) trims one
+ * full FORS tree out of the signer's work and one full auth path out of
+ * the signature, paid for by a per-signature grinding step:
+ *
+ *   - The signer iterates a 16-byte counter until the digest
+ *         dVal = keccak(pkSeed ‖ R ‖ digest ‖ dom_FORS ‖ counter)
+ *     has its highest A-bit field equal to zero (i.e. the K-th tree's
+ *     index would be 0).
+ *   - The K-th tree is then never computed, never opened, and never
+ *     transmitted; the verifier just checks the zero-bit constraint and
+ *     compresses K-1 real roots into pkRoot.
  *
  * Used as a primary signer (parallel to ECDSA / WOTS+C). Account-side
  * convention is to rotate the owner address on every signed UserOp,
@@ -19,52 +32,56 @@ import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
  * Domain byte 0xFF..FD separates this scheme from spec SPHINCS+ and the
  * keccak-128-24 SLH-DSA family member.
  *
- * ─────────────────────────── Parameter tradeoff ────────────────────────
- *  All rows give ≥128-bit security at q=1 (intended single use per key).
- *  q=N security is the bound after N accidental reuses. "Tree work" is
- *  K·2^A keccak ops the signer must do per signature; it drives whether
- *  a Solidity round-trip test is feasible (<≈1M ops) or only a Python
- *  signer can produce vectors.
+ * ─────────────────────────── Current selection: K=14, A=10 ────────────
  *
- *   K  | A  | sig size | q=1 | q=2 | q=10 | q=100 | tree work | sol-signer?
- *   ---+----+----------+-----+-----+------+-------+-----------+-------------
- *    6 | 24 |  2,432 B | 128 | 122 | 108  |  88   |   100M    | no
- *    6 | 22 |  2,144 B | 116 | 110 |  92  |  64   |    25M    | no
- *    8 | 19 |  2,592 B | 128 | 120 | 102  |  78   |   4.2M    | borderline
- *   10 | 16 |  2,752 B | 128 | 118 |  95  |  65   |   655k    | slow (~10m)
- *   12 | 15 |  3,104 B | 132 | 119 |  89  |  53   |   393k    | slow (~5m)
- * ► 14 | 13 |  3,168 B | 128 | 114 |  80  |  ~40  |   115k    | yes (~1m)
- *   16 | 12 |  3,360 B | 128 | 112 |  70  |  ~28  |    65k    | yes (~30s)
- *   18 | 11 |  3,488 B | 126 | 110 |  60  |  ~16  |    37k    | yes (~15s)
+ *  Signature size:  2,336 B
+ *  Tree work:       ~41k keccak / signature
+ *                   (≈ 41 ms on a laptop with hashlib-backed keccak)
  *
- *  Current selection: K=14, A=13. Trades ~30% larger signature for
- *  Solidity-feasible round-trip tests and graceful-but-bounded
- *  degradation on key reuse.
+ *  Security at q signatures (bits, classical):
+ *      q=1: 128     q=2: 126     q=3: 118     q=4: 112     q=5: 108
  *
- *  To revisit: change FORS_K and FORS_A below; assembly literals are
- *  also derived from these — see the inline comments in `recover()`.
+ *  q=1 is at the 128-bit NIST Level 1 ceiling (K·A = 140 saturates the
+ *  hash-output cap). Reuse degrades faster than the K=14, A=13 baseline
+ *  but every q≤5 stays well above any classically-feasible attack.
+ *
+ *  Full discussion of the scheme, parameter sweep, and rationale lives in
+ *  docs/fors-parameters.md.
+ *
  * ──────────────────────────────────────────────────────────────────────
  *
- * Estimated verification cost: ~55k gas.
+ * Estimated verification cost: ~40k gas.
  */
 
 // --- Primary parameters ---
 
 uint256 constant FORS_N = 16;     // hash truncation / node size
-uint256 constant FORS_K = 14;     // FORS trees
-uint256 constant FORS_A = 13;     // FORS tree height (2^A leaves per tree)
+uint256 constant FORS_K = 14;     // FORS trees (paper-style; only K-1 are real under +C)
+uint256 constant FORS_A = 10;     // FORS tree height (2^A leaves per tree)
 
 // --- Derived: signature layout ---
+//
+// Layout (FORS+C):
+//   [0      ..16   ) : R          (16 B, kept in top half of a 32-byte slot)
+//   [16     ..32   ) : pkSeed     (16 B, ditto)
+//   [32     ..2320 ) : (K-1)=13 trees, each (sk‖auth_path) of 16 + A·16 = 176 B
+//   [2320   ..2336 ) : counter    (16 B, top half; bottom half is unused)
+//
+// The K-th tree's auth path is omitted entirely; the verifier knows
+// mdT[K-1] = 0 from the grinding constraint and never opens that tree.
 
 uint256 constant FORS_R_LEN         = 16;
 uint256 constant FORS_PKSEED_LEN    = 16;
-uint256 constant FORS_TREE_LEN      = 16 + FORS_A * 16;          // 224
-uint256 constant FORS_SECTION_LEN   = FORS_K * FORS_TREE_LEN;    // 3,136
-uint256 constant FORS_SIG_LEN       = FORS_R_LEN + FORS_PKSEED_LEN + FORS_SECTION_LEN; // 3,168
+uint256 constant FORS_TREE_LEN      = 16 + FORS_A * 16;            // 176
+uint256 constant FORS_SECTION_LEN   = (FORS_K - 1) * FORS_TREE_LEN;// 2,288
+uint256 constant FORS_COUNTER_LEN   = 16;
+uint256 constant FORS_SIG_LEN       =
+    FORS_R_LEN + FORS_PKSEED_LEN + FORS_SECTION_LEN + FORS_COUNTER_LEN; // 2,336
 
 uint256 constant FORS_R_OFFSET       = 0;
 uint256 constant FORS_PKSEED_OFFSET  = FORS_R_OFFSET + FORS_R_LEN;     // 16
-uint256 constant FORS_SECTION_OFFSET = FORS_R_OFFSET + FORS_R_LEN + FORS_PKSEED_LEN; // 32
+uint256 constant FORS_SECTION_OFFSET = FORS_PKSEED_OFFSET + FORS_PKSEED_LEN; // 32
+uint256 constant FORS_COUNTER_OFFSET = FORS_SECTION_OFFSET + FORS_SECTION_LEN; // 2,320
 
 // --- Derived: bit ops ---
 
@@ -79,7 +96,7 @@ uint256 constant FORS_TYPE_FORS_TREE  = 3;
 uint256 constant FORS_TYPE_FORS_ROOTS = 4;
 
 /// @title ForsVerifier
-/// @notice Standalone FORS verifier in the JARDIN keccak family.
+/// @notice Standalone FORS+C verifier in the JARDIN keccak family.
 contract ForsVerifier is IForsVerifier {
 
     // --- Public parameters (ABI-readable) ---
@@ -94,72 +111,84 @@ contract ForsVerifier is IForsVerifier {
         bytes calldata sig,
         bytes32 digest
     ) external pure override returns (address signer) {
-        // Hoist computed constants into locals (Solidity inline assembly only
-        // accepts direct number literals).
-        uint256 SIG_LEN_      = FORS_SIG_LEN;
-        uint256 N_MASK        = FORS_TOP_N_MASK;
-        uint256 DOM           = FORS_DOM;
-        uint256 SECTION_OFF   = FORS_SECTION_OFFSET;
-        uint256 TREE_LEN_     = FORS_TREE_LEN;          // 16 + A·16
-        uint256 ROOTS_HASH_LEN = (FORS_K + 2) * 32;     // seed + ADRS + K·32
+        // Hoist computed constants into locals — Solidity inline assembly
+        // only accepts numeric literals or value-typed locals as operands.
+        // Putting all parameter-derived values here means changing FORS_K
+        // / FORS_A at the top of the file is enough to retune the verifier;
+        // no assembly literal needs to be touched.
+        uint256 SIG_LEN_       = FORS_SIG_LEN;
+        uint256 N_MASK         = FORS_TOP_N_MASK;
+        uint256 DOM            = FORS_DOM;
+        uint256 SECTION_OFF    = FORS_SECTION_OFFSET;
+        uint256 COUNTER_OFF    = FORS_COUNTER_OFFSET;
+        uint256 TREE_LEN_      = FORS_TREE_LEN;             // 16 + A·16
+        uint256 ROOTS_HASH_LEN = (FORS_K + 1) * 32;         // pkSeed + ADRS + (K-1)·N
+
+        // Parameter-derived loop bounds and bit masks:
+        uint256 KMINUS1   = FORS_K - 1;                      // outer tree-open loop bound
+        uint256 A_        = FORS_A;                          // inner-loop bound, A·t shift, leaf-ADRS shift
+        uint256 AMINUS1   = FORS_A - 1;                      // globalY shift base (A-1-j)
+        uint256 MD_MASK   = (uint256(1) << FORS_A) - 1;      // mdT mask = (1<<A) - 1
+        uint256 KMINUS1_A = (FORS_K - 1) * FORS_A;           // bit offset of the K-th mdT field in dVal
 
         if (sig.length != SIG_LEN_) return address(0);
 
         assembly ("memory-safe") {
-            // === Hard-coded literals corresponding to (K=14, A=13) ===
-            // K = 14                        — outer loop bounds
-            // A = 13                        — inner climb bound, mdT mask, shifts
-            // A_MINUS_1 = 12                — globalY shift base
-            // MD_BITS = 13                  — bits per md[t] in dVal
-            // MD_MASK = 0x1FFF              — (1 << A) - 1 = 8191
-            //
-            // If you change FORS_K or FORS_A above, update the literals here
-            // (and the table at the top of this file).
 
             let sigBase := sig.offset
 
-            // R: top 16 B of the first 32-byte slot.
-            // pkSeed: top 16 B of the next 32-byte slot.
-            let R      := and(calldataload(sigBase),       N_MASK)
-            let pkSeed := and(calldataload(add(sigBase, 16)), N_MASK)
+            // R, pkSeed, counter: each is 16 B kept in the top half of a
+            // 32-byte word, with the next 16 B masked off.
+            let R       := and(calldataload(sigBase),                 N_MASK)
+            let pkSeed  := and(calldataload(add(sigBase, 16)),        N_MASK)
+            let counter := and(calldataload(add(sigBase, COUNTER_OFF)), N_MASK)
 
-            // ─── Hmsg = keccak(pkSeed ‖ R ‖ digest ‖ dom_FORS) = 128 B ───
+            // ─── Hmsg = keccak(pkSeed ‖ R ‖ digest ‖ dom_FORS ‖ counter) = 160 B ───
             mstore(0x00, pkSeed)
             mstore(0x20, R)
             mstore(0x40, digest)
             mstore(0x60, DOM)
-            let dVal := keccak256(0x00, 0x80)
+            mstore(0x80, counter)
+            let dVal := keccak256(0x00, 0xa0)
 
-            // md[t] = (dVal >> (A·t)) & ((1<<A) - 1)   for t = 0..K-1
-            // (LSB-first; K · A bits used = 14 · 13 = 182 bits, fits in 256.)
+            // FORS+C grinding check: the K-th A-bit field of dVal (bits
+            // (K-1)·A .. K·A-1) must be zero. If the signer didn't grind
+            // to satisfy this, reject with address(0).
+            if and(shr(KMINUS1_A, dVal), MD_MASK) {
+                mstore(0x00, 0)
+                return(0x00, 0x20)
+            }
+
+            // md[t] = (dVal >> (A·t)) & ((1<<A) - 1)   for t = 0..K-2
+            // (LSB-first; (K-1) · A bits of dVal are consumed.)
 
             // From here on, pkSeed sits at 0x00 for every hash call.
             mstore(0x00, pkSeed)
 
-            // ─── FORS tree verification ───
+            // ─── FORS tree verification (K-1 real trees) ───
             //   ADRS base for FORS at this standalone keypair:
             //   type=3, layer=tree=kp=0
             let forsBase := shl(128, 3)
 
-            for { let t := 0 } lt(t, 14) { t := add(t, 1) } {
-                // mdT in 13 LSB; mask 0x1FFF
-                let mdT     := and(shr(mul(13, t), dVal), 0x1FFF)
+            for { let t := 0 } lt(t, KMINUS1) { t := add(t, 1) } {
+                // mdT = (dVal >> (A·t)) & MD_MASK
+                let mdT     := and(shr(mul(A_, t), dVal), MD_MASK)
                 let treeOff := add(SECTION_OFF, mul(t, TREE_LEN_))
                 let sk      := and(calldataload(add(sigBase, treeOff)), N_MASK)
 
-                // Leaf ADRS: cp=0, ha = (t << A) | mdT  = (t << 13) | mdT
-                mstore(0x20, or(forsBase, or(shl(13, t), mdT)))
+                // Leaf ADRS: cp=0, ha = (t << A) | mdT
+                mstore(0x20, or(forsBase, or(shl(A_, t), mdT)))
                 mstore(0x40, sk)
                 let node := and(keccak256(0x00, 0x60), N_MASK)
 
-                // Climb A=13 auth-path levels.
+                // Climb A auth-path levels.
                 let authPtr := add(sigBase, add(treeOff, 16))
                 let pathIdx := mdT
-                for { let j := 0 } lt(j, 13) { j := add(j, 1) } {
+                for { let j := 0 } lt(j, A_) { j := add(j, 1) } {
                     let sibling   := and(calldataload(add(authPtr, shl(4, j))), N_MASK)
                     let parentIdx := shr(1, pathIdx)
-                    // globalY = (t << (A-1-j)) | parentIdx = (t << (12-j)) | parentIdx
-                    let globalY := or(shl(sub(12, j), t), parentIdx)
+                    // globalY = (t << (A-1-j)) | parentIdx
+                    let globalY := or(shl(sub(AMINUS1, j), t), parentIdx)
                     mstore(0x20, or(forsBase, or(shl(32, add(j, 1)), globalY)))
                     let s := shl(5, and(pathIdx, 1))
                     mstore(xor(0x40, s), node)
@@ -171,13 +200,14 @@ contract ForsVerifier is IForsVerifier {
                 mstore(add(0x80, shl(5, t)), node)
             }
 
-            // ─── Compress K=14 FORS roots: T_l(seed, ADRS, roots) = (K+2)·32 = 512 B ───
+            // ─── Compress K-1 FORS roots ───
+            //   T(seed, ADRS_roots, root_0..root_{K-2}) over (K+1)·32 bytes
             {
                 let adrsRoots := shl(128, 4)   // type=FORS_ROOTS, kp=0
                 mstore(0x20, adrsRoots)
                 // Pack pattern: pack[t] at 0x40+t·32, source[t] at 0x80+t·32.
                 // Safe because pack[t] overwrites source[t-2] (already consumed).
-                for { let t := 0 } lt(t, 14) { t := add(t, 1) } {
+                for { let t := 0 } lt(t, KMINUS1) { t := add(t, 1) } {
                     mstore(add(0x40, shl(5, t)), mload(add(0x80, shl(5, t))))
                 }
             }
