@@ -134,6 +134,10 @@ contract ForsVerifier is IForsVerifier {
         if (sig.length != SIG_LEN_) return address(0);
 
         assembly ("memory-safe") {
+            // Save FMP — the loops below trample 0x40 and 0x60 (Solidity's
+            // FMP slot and zero slot) using them as keccak input scratch.
+            // We restore both before falling through to Solidity's return.
+            let fmpBackup := mload(0x40)
 
             let sigBase := sig.offset
 
@@ -218,6 +222,10 @@ contract ForsVerifier is IForsVerifier {
             mstore(0x20, pkRoot)
             signer := and(keccak256(0x00, 0x40),
                 0x000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
+
+            // Restore FMP and zero slot for whatever follows in Solidity.
+            mstore(0x40, fmpBackup)
+            mstore(0x60, 0)
         }
     }
 }
