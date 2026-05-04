@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../src/SimpleAccount_WOTS.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
+import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 
@@ -276,7 +277,8 @@ contract WotsCVerifierTest is Test {
 
         SimpleAccountFactory factory = new SimpleAccountFactory(
             IEntryPoint(ENTRYPOINT),
-            IWotsCVerifier(address(verifier))
+            IWotsCVerifier(address(verifier)),
+            IForsVerifier(address(0))
         );
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
@@ -320,7 +322,8 @@ contract WotsCVerifierTest is Test {
         // Deploy a real factory + account owned by our WOTS-derived address.
         SimpleAccountFactory factory = new SimpleAccountFactory(
             IEntryPoint(ENTRYPOINT),
-            IWotsCVerifier(address(verifier))
+            IWotsCVerifier(address(verifier)),
+            IForsVerifier(address(0))
         );
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
@@ -362,7 +365,8 @@ contract WotsCVerifierTest is Test {
 
         SimpleAccountFactory factory = new SimpleAccountFactory(
             IEntryPoint(ENTRYPOINT),
-            IWotsCVerifier(address(verifier))
+            IWotsCVerifier(address(verifier)),
+            IForsVerifier(address(0))
         );
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
@@ -404,7 +408,8 @@ contract WotsCVerifierTest is Test {
 
         SimpleAccountFactory factory = new SimpleAccountFactory(
             IEntryPoint(ENTRYPOINT),
-            IWotsCVerifier(address(verifier))
+            IWotsCVerifier(address(verifier)),
+            IForsVerifier(address(0))
         );
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
@@ -451,7 +456,8 @@ contract WotsCVerifierTest is Test {
 
         SimpleAccountFactory factory = new SimpleAccountFactory(
             IEntryPoint(ENTRYPOINT),
-            IWotsCVerifier(address(verifier))
+            IWotsCVerifier(address(verifier)),
+            IForsVerifier(address(0))
         );
         address accountAddr = factory.createAccount(k.addr, 0, 1);
         SimpleAccount_WOTS account = SimpleAccount_WOTS(payable(accountAddr));
