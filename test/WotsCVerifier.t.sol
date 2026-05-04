@@ -47,12 +47,53 @@ library WotsSigner {
         address         addr;  // low 20 bytes of keccak256(pk[0]||..||pk[L-1])
     }
 
+    /// @dev SPHINCS+ FIPS 205 ADRS for WOTS_HASH (type=0): 32 bytes, with
+    ///      layer=tree=keypair=0, chain=i, hash=s. As a 256-bit big-endian
+    ///      word that's `(i << 32) | s` since i sits in ADRS bytes 24..27
+    ///      and s in 28..31.
+    function _adrsHash(uint32 i, uint32 s) private pure returns (bytes32) {
+        return bytes32((uint256(i) << 32) | uint256(s));
+    }
+
+    /// @dev SPHINCS+ FIPS 205 ADRS for WOTS_PK (type=1): only the type field
+    ///      is set (byte 19 = 0x01); everything else zero.
+    function _adrsPk() private pure returns (bytes32) {
+        return bytes32(uint256(1) << 96);
+    }
+
     /// @dev One chain hash step. Matches WotsCVerifier inline assembly bit-for-bit:
-    ///      keccak256(seed(N) || i_u32(4) || s_u32(4) || cur_topN(N)) truncated to N bytes.
+    ///      keccak256(pkSeed(N) || ADRS(32) || cur(N)) truncated to N bytes.
     function chainStep(bytes16 seed, uint32 i, uint32 s, bytes16 cur)
         internal pure returns (bytes16)
     {
-        return bytes16(keccak256(abi.encodePacked(seed, i, s, cur)));
+        return bytes16(keccak256(abi.encodePacked(seed, _adrsHash(i, s), cur)));
+    }
+
+    /// @dev T_l: compress L pubkey endpoints into a 16-byte root.
+    ///      keccak(pkSeed(N) || ADRS_PK(32) || pk_0(N) || … || pk_{L-1}(N))
+    function _compressPk(bytes16 seed, bytes16[WOTS_L] memory pk)
+        private pure returns (bytes16)
+    {
+        bytes memory buf = new bytes(WOTS_N + 32 + WOTS_L * WOTS_N);
+        for (uint256 b = 0; b < WOTS_N; b++) buf[b] = seed[b];
+        // ADRS_PK is mostly zero; bytes 16..47 of buf are the ADRS, with
+        // type=1 living at ADRS byte 19 (= buf byte 35).
+        buf[WOTS_N + 19] = bytes1(0x01);
+        // pk endpoints
+        uint256 dataOff = WOTS_N + 32;
+        for (uint256 i = 0; i < WOTS_L; i++) {
+            bytes16 p = pk[i];
+            for (uint256 b = 0; b < WOTS_N; b++) {
+                buf[dataOff + i * WOTS_N + b] = p[b];
+            }
+        }
+        return bytes16(keccak256(buf));
+    }
+
+    /// @dev Address = keccak(pkSeed || pkRoot)[12:32]. Mirrors the FORS+C
+    ///      verifier's address-derivation pattern.
+    function _deriveAddr(bytes16 seed, bytes16 pkRoot) private pure returns (address) {
+        return address(uint160(uint256(keccak256(abi.encodePacked(seed, pkRoot)))));
     }
 
     /// @dev Extract the i-th 5-bit (or W_BITS-bit) digit from a 256-bit word.
@@ -76,15 +117,10 @@ library WotsSigner {
             k.pk[i] = cur;
         }
 
-        // pkHash = keccak256(pk[0] || ... || pk[L-1]) — each N bytes, SIG_DATA total.
-        bytes memory buf = new bytes(WOTS_SIG_DATA);
-        for (uint256 i = 0; i < WOTS_L; i++) {
-            bytes16 p = k.pk[i];
-            for (uint256 b = 0; b < WOTS_N; b++) {
-                buf[i * WOTS_N + b] = p[b];
-            }
-        }
-        k.addr = address(uint160(uint256(keccak256(buf))));
+        // pkRoot = T_l(pkSeed, ADRS_PK, pk_0, ..., pk_{L-1})
+        bytes16 pkRoot = _compressPk(k.seed, k.pk);
+        // address = keccak(pkSeed || pkRoot)[12:32]
+        k.addr = _deriveAddr(k.seed, pkRoot);
     }
 
     /// @dev Produce a BLOB_LEN-byte blob that verifies against `k.addr` for `digest`.
