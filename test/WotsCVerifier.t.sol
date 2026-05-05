@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount_WOTS.sol";
+import "../src/SimpleAccounts/SimpleAccount_WOTS.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
 import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
@@ -24,7 +24,7 @@ import {
     WOTS_CTR_OFFSET,
     WOTS_SEED_OFFSET,
     WOTS_DIGIT_SHIFT_0
-} from "../src/WotsCVerifier.sol";
+} from "../src/Verifiers/WotsCVerifier.sol";
 
 /// @dev Test-only WOTS+C key derivation and signer. Replicates the on-chain
 ///      WotsCVerifier algorithm using the same parameter set, imported from

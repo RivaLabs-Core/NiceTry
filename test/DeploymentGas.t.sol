@@ -3,9 +3,9 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {SimpleAccountFactory} from "../src/SimpleAccountFactory.sol";
-import {SimpleAccount_WOTS} from "../src/SimpleAccount_WOTS.sol";
-import {SimpleAccount_ECDSA} from "../src/SimpleAccount_ECDSA.sol";
-import {WotsCVerifier} from "../src/WotsCVerifier.sol";
+import {SimpleAccount_WOTS} from "../src/SimpleAccounts/SimpleAccount_WOTS.sol";
+import {SimpleAccount_ECDSA} from "../src/SimpleAccounts/SimpleAccount_ECDSA.sol";
+import {WotsCVerifier} from "../src/Verifiers/WotsCVerifier.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
 import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";

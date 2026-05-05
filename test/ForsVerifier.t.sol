@@ -15,7 +15,7 @@ import {
     FORS_DOM,
     FORS_TYPE_FORS_TREE,
     FORS_TYPE_FORS_ROOTS
-} from "../src/ForsVerifier.sol";
+} from "../src/Verifiers/ForsVerifier.sol";
 
 /// @dev Test-only FORS+C signer. Mirrors ForsVerifier exactly: same ADRS
 ///      shapes, same hash inputs, same JARDIN-style padding.

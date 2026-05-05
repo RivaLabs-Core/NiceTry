@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
+import {IWotsCVerifier} from "../Interfaces/IWotsCVerifier.sol";
 
 /*
  * WOTS+C parameters.

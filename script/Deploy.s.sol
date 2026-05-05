@@ -3,8 +3,8 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../src/SimpleAccountFactory.sol";
-import "../src/WotsCVerifier.sol";
-import "../src/ForsVerifier.sol";
+import "../src/Verifiers/WotsCVerifier.sol";
+import "../src/Verifiers/ForsVerifier.sol";
 import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
 
 contract Deploy is Script {

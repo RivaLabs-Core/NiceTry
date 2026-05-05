@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IKernelValidator} from "./IKernelValidator.sol";
 import {IWotsCVerifier} from "../Interfaces/IWotsCVerifier.sol";
-import {WOTS_BLOB_LEN} from "../WotsCVerifier.sol";
+import {WOTS_BLOB_LEN} from "../Verifiers/WotsCVerifier.sol";
 
 /// @title KernelRotatingWOTSValidator
 /// @notice ZeroDev Kernel v3.1-compatible WOTS+C validator with automatic
