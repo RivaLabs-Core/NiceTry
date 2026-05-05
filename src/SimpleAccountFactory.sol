@@ -54,8 +54,10 @@ contract SimpleAccountFactory {
             SimpleAccount_ECDSA(payable(accountAddr)).initialize(owner);
         } else if (mode == 1) {
             SimpleAccount_WOTS(payable(accountAddr)).initialize(owner);
-        } else {
+        } else if (mode == 2) {
             SimpleAccount_FORS(payable(accountAddr)).initialize(owner);
+        } else {
+            revert("SimpleAccountFactory: invalid mode");
         }
 
         emit AccountCreated(accountAddr, owner, salt);
