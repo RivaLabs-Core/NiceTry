@@ -32,21 +32,28 @@ import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
  * Domain byte 0xFF..FD separates this scheme from spec SPHINCS+ and the
  * keccak-128-24 SLH-DSA family member.
  *
- * ─────────────────────────── Current selection: K=14, A=10 ────────────
+ * ─────────────────────────── Current selection: K=26, A=5 ─────────────
  *
- *  Signature size:  2,336 B
- *  Tree work:       ~41k keccak / signature
- *                   (≈ 41 ms on a laptop with hashlib-backed keccak)
+ *  Signature size:  2,448 B
+ *  Signer work:     ~2.4k keccak / signature
+ *                   (≈ 2.4 ms on a laptop with hashlib-backed keccak;
+ *                   ≈ 7 s on Ledger SE with software Keccak — usable!)
  *
  *  Security at q signatures (bits, classical):
- *      q=1: 128     q=2: 126     q=3: 118     q=4: 112     q=5: 108
+ *      q=1: 128     q=2: 104     q=3: 89      q=4: 78      q=5: 70
  *
- *  q=1 is at the 128-bit NIST Level 1 ceiling (K·A = 140 saturates the
- *  hash-output cap). Reuse degrades faster than the K=14, A=13 baseline
- *  but every q≤5 stays well above any classically-feasible attack.
+ *  q=1 is at the 128-bit NIST Level 1 ceiling (K·A = 130 just clears
+ *  the hash-output cap). q-degradation is steep — reuse beyond q=2
+ *  drops below Level 1. Justified by the rotation-per-UserOp model:
+ *  the normal path is q=1, and the two-forest cache (see
+ *  docs/fors-two-forest-cache.md) bounds the worst-case-reuse to a
+ *  small budget (typically ≤ 2..3) for replacement / dropped-tx flows.
  *
- *  Full discussion of the scheme, parameter sweep, and rationale lives in
- *  docs/fors-parameters.md.
+ *  The signer-cost win over K=14, A=10 is ~17× (2^10 → 2^5 leaves per
+ *  tree dominates), making this set viable on hardware wallets.
+ *
+ *  Full discussion of the scheme, parameter sweep, and rationale lives
+ *  in docs/fors-parameters.md and docs/fors-two-forest-cache.md.
  *
  * ──────────────────────────────────────────────────────────────────────
  *
@@ -56,16 +63,16 @@ import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
 // --- Primary parameters ---
 
 uint256 constant FORS_N = 16;     // hash truncation / node size
-uint256 constant FORS_K = 14;     // FORS trees (paper-style; only K-1 are real under +C)
-uint256 constant FORS_A = 10;     // FORS tree height (2^A leaves per tree)
+uint256 constant FORS_K = 26;     // FORS trees (paper-style; only K-1 are real under +C)
+uint256 constant FORS_A = 5;      // FORS tree height (2^A leaves per tree)
 
 // --- Derived: signature layout ---
 //
 // Layout (FORS+C):
 //   [0      ..16   ) : R          (16 B, kept in top half of a 32-byte slot)
 //   [16     ..32   ) : pkSeed     (16 B, ditto)
-//   [32     ..2320 ) : (K-1)=13 trees, each (sk‖auth_path) of 16 + A·16 = 176 B
-//   [2320   ..2336 ) : counter    (16 B, top half; bottom half is unused)
+//   [32     ..2432 ) : (K-1)=25 trees, each (sk‖auth_path) of 16 + A·16 = 96 B
+//   [2432   ..2448 ) : counter    (16 B, top half; bottom half is unused)
 //
 // The K-th tree's auth path is omitted entirely; the verifier knows
 // mdT[K-1] = 0 from the grinding constraint and never opens that tree.
