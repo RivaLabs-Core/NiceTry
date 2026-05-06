@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {IForsVerifier} from "../Interfaces/IForsVerifier.sol";
 
 /*
- * Standalone FORS+C signature verifier (JARDIN-family Keccak variant).
+ * Standalone FORS+C signature verifier (Keccak variant).
  *
  * FORS-only post-quantum few-time signature scheme using the same hash
  * primitives, ADRS layout, and 16-byte hash truncation as the FORS sub-
@@ -103,7 +103,7 @@ uint256 constant FORS_TYPE_FORS_TREE  = 3;
 uint256 constant FORS_TYPE_FORS_ROOTS = 4;
 
 /// @title ForsVerifier
-/// @notice Standalone FORS+C verifier in the JARDIN keccak family.
+/// @notice Standalone FORS+C verifier (Keccak primitive).
 contract ForsVerifier is IForsVerifier {
 
     // --- Public parameters (ABI-readable) ---

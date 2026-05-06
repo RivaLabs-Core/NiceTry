@@ -17,7 +17,7 @@ import {LibClone} from "solady/utils/LibClone.sol";
 ///         Modes:
 ///           0 = ECDSA
 ///           1 = WOTS+C
-///           2 = FORS (standalone, JARDIN-family)
+///           2 = FORS+C
 contract SimpleAccountFactory {
     IEntryPoint public immutable ENTRY_POINT;
     IWotsCVerifier public immutable WOTS_VERIFIER;

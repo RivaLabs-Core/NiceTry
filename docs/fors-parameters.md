@@ -13,8 +13,7 @@ It is intended to be read alongside `src/ForsVerifier.sol` and
 ## 1. TL;DR
 
 **Scheme:** standalone FORS+C (Forest Of Random Subsets, with the +C grinding
-optimization from Hülsing–Kudinov–Ronen–Yogev 2023). JARDIN-family Keccak
-variant — same hash primitive and ADRS layout as our SLH-DSA-Keccak-128-24
+optimization from Hülsing–Kudinov–Ronen–Yogev 2023). Same hash primitive and ADRS layout as our SLH-DSA-Keccak-128-24
 SphincsVerifier, but no XMSS hypertree on top.
 
 **Current parameters:** `K = 14`, `A = 10`, `n = 16` (16-byte truncated keccak256).

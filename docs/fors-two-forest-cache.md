@@ -1,8 +1,7 @@
 # Two-Forest FORS Cache
 
 This note formalizes the local signer cache for the NiceTry FORS account model.
-It is intentionally simpler than JARDIN's slot tree: the smart account stores a
-single `owner` address, and every successful UserOp rotates that owner to the
+The smart account stores a single `owner` address, and every successful UserOp rotates that owner to the
 `nextOwner` appended to `userOp.callData`.
 
 Terminology: a "FORS forest" here means the full signer material for one FORS

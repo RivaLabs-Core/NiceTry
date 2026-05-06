@@ -18,7 +18,7 @@ import {
 } from "../src/Verifiers/ForsVerifier.sol";
 
 /// @dev Test-only FORS+C signer. Mirrors ForsVerifier exactly: same ADRS
-///      shapes, same hash inputs, same JARDIN-style padding.
+///      shapes, same hash inputs, same hash padding convention.
 ///
 ///      Memory budget per round-trip: ~25 × bytes16[64] = ~50 KB allocated
 ///      across derive() + sign(); tractable at K=26, A=5 (~2.4k keccaks).
