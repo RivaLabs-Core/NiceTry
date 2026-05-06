@@ -2,11 +2,11 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount_WOTS.sol";
+import "../src/SimpleAccounts/SimpleAccount_WOTS.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
 import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
-import {WOTS_BLOB_LEN} from "../src/WotsCVerifier.sol";
+import {WOTS_BLOB_LEN} from "../src/Verifiers/WotsCVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 

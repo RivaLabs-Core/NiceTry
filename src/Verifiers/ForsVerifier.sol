@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
+import {IForsVerifier} from "../Interfaces/IForsVerifier.sol";
 
 /*
  * Standalone FORS+C signature verifier (JARDIN-family Keccak variant).

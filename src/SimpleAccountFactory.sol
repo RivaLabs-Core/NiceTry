@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {SimpleAccount_ECDSA} from "./SimpleAccount_ECDSA.sol";
-import {SimpleAccount_WOTS} from "./SimpleAccount_WOTS.sol";
-import {SimpleAccount_FORS} from "./SimpleAccount_FORS.sol";
+import {SimpleAccount_ECDSA} from "./SimpleAccounts/SimpleAccount_ECDSA.sol";
+import {SimpleAccount_WOTS} from "./SimpleAccounts/SimpleAccount_WOTS.sol";
+import {SimpleAccount_FORS} from "./SimpleAccounts/SimpleAccount_FORS.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {IWotsCVerifier} from "./Interfaces/IWotsCVerifier.sol";
 import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";

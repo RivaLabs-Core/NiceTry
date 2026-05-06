@@ -16,9 +16,9 @@ import {ExecLib} from "kernel/utils/ExecLib.sol";
 import {ExecMode} from "kernel/types/Types.sol";
 
 // Our pieces
-import {WotsCVerifier} from "../src/WotsCVerifier.sol";
+import {WotsCVerifier} from "../src/Verifiers/WotsCVerifier.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
-import {KernelRotatingWOTSValidator} from "../src/Module/KernelRotatingWOTSValidator.sol";
+import {KernelRotatingWOTSValidator} from "../src/Modules/KernelRotatingWOTSValidator.sol";
 
 // Test-only signer from the existing WOTS verifier suite.
 import {WotsSigner} from "./WotsCVerifier.t.sol";

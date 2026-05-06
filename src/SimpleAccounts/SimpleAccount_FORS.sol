@@ -4,8 +4,8 @@ pragma solidity ^0.8.24;
 import {IAccount} from "account-abstraction/interfaces/IAccount.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
-import {IForsVerifier} from "./Interfaces/IForsVerifier.sol";
-import {FORS_SIG_LEN} from "./ForsVerifier.sol";
+import {IForsVerifier} from "../Interfaces/IForsVerifier.sol";
+import {FORS_SIG_LEN} from "../Verifiers/ForsVerifier.sol";
 
 /// @title SimpleAccount_FORS
 /// @notice ERC-4337 smart account using standalone FORS as the primary signer.

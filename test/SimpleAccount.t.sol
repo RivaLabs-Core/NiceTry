@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount_ECDSA.sol";
+import "../src/SimpleAccounts/SimpleAccount_ECDSA.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
 import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
