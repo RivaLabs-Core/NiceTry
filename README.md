@@ -68,11 +68,15 @@ design and tooling mature.
 
 **WOTS+C** (`src/Verifiers/WotsCVerifier.sol`): W=32 (5-bit Winternitz),
 L=26 chains, N=16, target sum = L·(W−1)/2 = 403. Signature 468 bytes.
+Signer hashes per signature: ~1.5k (full keygen + chain walks + counter
+search). No tree to cache; chains are 32-step linear sequences and the
+signer state is just the 16 B seed.
 
 **FORS+C** (`src/Verifiers/ForsVerifier.sol`): K=26 trees, A=5 (32 leaves
 each), N=16. Signature 2,448 bytes. q-degradation: q=1 = 128 bits (NIST
-Level 1), q=2 = 104, q=5 = 70. Signer keygen ~2.4k keccak (interactive on
-hardware wallets).
+Level 1), q=2 = 104, q=5 = 70. Signer hashes per signature: ~2.4k
+(interactive on hardware wallets). Tree cache per keypair: ~25 KB
+(K-1 = 25 trees × 63 nodes × 16 B).
 
 To retune either scheme, edit the primary parameters at the top of the
 verifier file. All derived constants (signature layout, hash inputs, loop
