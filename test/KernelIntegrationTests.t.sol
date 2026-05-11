@@ -16,7 +16,7 @@ import {ExecLib} from "kernel/utils/ExecLib.sol";
 import {ExecMode} from "kernel/types/Types.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import {KernelRotatingECDSAValidator} from "../src/Module/KernelRotatingECDSAValidator.sol";
+import {KernelRotatingECDSAValidator} from "../src/Modules/KernelRotatingECDSAValidator.sol";
 
 /// @dev Step 2a: install-only integration test.
 ///

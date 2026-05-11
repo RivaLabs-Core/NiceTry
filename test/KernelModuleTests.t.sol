@@ -2,8 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {KernelRotatingECDSAValidator} from "../src/Module/KernelRotatingECDSAValidator.sol";
-import {MockKernelAccount} from "../src/Module/MockKernelAccount.sol";
+import {KernelRotatingECDSAValidator} from "../src/Modules/KernelRotatingECDSAValidator.sol";
+import {MockKernelAccount} from "../src/Modules/MockKernelAccount.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 

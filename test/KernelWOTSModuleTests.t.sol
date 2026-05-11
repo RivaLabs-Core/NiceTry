@@ -2,10 +2,10 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {KernelRotatingWOTSValidator} from "../src/Module/KernelRotatingWOTSValidator.sol";
-import {MockKernelAccount} from "../src/Module/MockKernelAccount.sol";
+import {KernelRotatingWOTSValidator} from "../src/Modules/KernelRotatingWOTSValidator.sol";
+import {MockKernelAccount} from "../src/Modules/MockKernelAccount.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
-import {WOTS_BLOB_LEN} from "../src/WotsCVerifier.sol";
+import {WOTS_BLOB_LEN} from "../src/Verifiers/WotsCVerifier.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 
 /// @dev wrecover mock: test pre-sets the address to return.

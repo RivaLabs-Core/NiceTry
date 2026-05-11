@@ -2,9 +2,10 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount_ECDSA.sol";
+import "../src/SimpleAccounts/SimpleAccount_ECDSA.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
+import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -38,7 +39,7 @@ contract SimpleAccountTest is Test {
         vm.etch(ENTRYPOINT, hex"00");
 
         // ECDSA path doesn't use the WOTS verifier, so we pass a dummy address.
-        factory = new SimpleAccountFactory(entryPoint, IWotsCVerifier(address(0)));
+        factory = new SimpleAccountFactory(entryPoint, IWotsCVerifier(address(0)), IForsVerifier(address(0)));
 
         address accountAddr = factory.createAccount(owner0, 0, 0);
         account = SimpleAccount_ECDSA(payable(accountAddr));

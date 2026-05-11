@@ -2,14 +2,19 @@
 cache/
 out/
 
+# Local research / agent cache
+.codex-cache/
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
 /broadcast/**/dry-run/
 broadcast/
 
-# Docs
-docs/
+# Docs (forge-doc output) — but keep hand-written notes
+docs/*
+!docs/fors-parameters.md
+!docs/fors-two-forest-cache.md
 
 # Dotenv file
 .env

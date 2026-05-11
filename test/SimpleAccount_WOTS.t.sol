@@ -2,10 +2,11 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import "../src/SimpleAccount_WOTS.sol";
+import "../src/SimpleAccounts/SimpleAccount_WOTS.sol";
 import "../src/SimpleAccountFactory.sol";
 import {IWotsCVerifier} from "../src/Interfaces/IWotsCVerifier.sol";
-import {WOTS_BLOB_LEN} from "../src/WotsCVerifier.sol";
+import {IForsVerifier} from "../src/Interfaces/IForsVerifier.sol";
+import {WOTS_BLOB_LEN} from "../src/Verifiers/WotsCVerifier.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 
@@ -44,7 +45,7 @@ contract SimpleAccountWotsTest is Test {
         vm.etch(ENTRYPOINT, hex"00");
 
         verifier = new MockWotsVerifier();
-        factory = new SimpleAccountFactory(entryPoint, verifier);
+        factory = new SimpleAccountFactory(entryPoint, verifier, IForsVerifier(address(0)));
 
         address accountAddr = factory.createAccount(owner0, 0, 1);
         account = SimpleAccount_WOTS(payable(accountAddr));
