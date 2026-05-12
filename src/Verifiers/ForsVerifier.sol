@@ -193,17 +193,22 @@ contract ForsVerifier is IForsVerifier {
                 let node := and(keccak256(0x00, 0x60), N_MASK)
 
                 // Climb A auth-path levels.
+                // authPtr pre-increments by 16 each iteration. The
+                // sibling calldataload is inlined at its mstore use
+                // site so the optimizer can fold it (a named local
+                // would have to live across the ADRS construction
+                // and pay stack-materialization gas).
                 let authPtr := add(sigBase, add(treeOff, 16))
                 let pathIdx := mdT
                 for { let j := 0 } lt(j, A_) { j := add(j, 1) } {
-                    let sibling   := and(calldataload(add(authPtr, shl(4, j))), N_MASK)
                     let parentIdx := shr(1, pathIdx)
                     // globalY = (t << (A-1-j)) | parentIdx
                     let globalY := or(shl(sub(AMINUS1, j), t), parentIdx)
                     mstore(0x20, or(forsBase, or(shl(32, add(j, 1)), globalY)))
                     let s := shl(5, and(pathIdx, 1))
                     mstore(xor(0x40, s), node)
-                    mstore(xor(0x60, s), sibling)
+                    mstore(xor(0x60, s), and(calldataload(authPtr), N_MASK))
+                    authPtr := add(authPtr, 16)
                     node := and(keccak256(0x00, 0x80), N_MASK)
                     pathIdx := parentIdx
                 }
