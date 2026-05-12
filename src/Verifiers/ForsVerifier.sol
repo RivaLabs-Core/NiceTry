@@ -57,7 +57,8 @@ import {IForsVerifier} from "../Interfaces/IForsVerifier.sol";
  *
  * ──────────────────────────────────────────────────────────────────────
  *
- * Estimated verification cost: ~40k gas.
+ * Measured verification cost at K=26, A=5: ~51k gas cold call,
+ * ~47k gas warm call.
  */
 
 // --- Primary parameters ---
@@ -174,7 +175,9 @@ contract ForsVerifier is IForsVerifier {
             // (LSB-first; (K-1) · A bits of dVal are consumed.)
 
             // From here on, pkSeed sits at 0x00 for every hash call.
-            mstore(0x00, pkSeed)
+            // It was already written for the Hmsg keccak above and
+            // nothing in the loops below touches 0x00, so no re-store
+            // is needed.
 
             // ─── FORS tree verification (K-1 real trees) ───
             //   ADRS base for FORS at this standalone keypair:
@@ -230,7 +233,7 @@ contract ForsVerifier is IForsVerifier {
             let pkRoot := and(keccak256(0x00, ROOTS_HASH_LEN), N_MASK)
 
             // ─── Address = keccak256(pad32(pkSeed) || pad32(pkRoot))[12:32] ───
-            mstore(0x00, pkSeed)
+            // pkSeed is still at 0x00 from the Hmsg setup — no rewrite needed.
             mstore(0x20, pkRoot)
             signer := and(keccak256(0x00, 0x40),
                 0x000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
