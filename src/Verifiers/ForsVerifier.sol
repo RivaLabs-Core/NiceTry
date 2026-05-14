@@ -57,15 +57,15 @@ import {IForsVerifier} from "../Interfaces/IForsVerifier.sol";
  *
  * ──────────────────────────────────────────────────────────────────────
  *
- * Measured verification cost at K=26, A=5: ~51k gas cold call,
- * ~47k gas warm call.
+ * Measured verification cost at K=26, A=5: ~38.1k gas cold call,
+ * ~34.1k gas warm call.
  */
 
 // --- Primary parameters ---
 
 uint256 constant FORS_N = 16;     // hash truncation / node size
 uint256 constant FORS_K = 26;     // FORS trees (paper-style; only K-1 are real under +C)
-uint256 constant FORS_A = 5;      // FORS tree height (2^A leaves per tree)
+uint256 constant FORS_A = 5;      // FORS tree height; auth climb is unrolled below
 
 // --- Derived: signature layout ---
 //
@@ -80,16 +80,25 @@ uint256 constant FORS_A = 5;      // FORS tree height (2^A leaves per tree)
 
 uint256 constant FORS_R_LEN         = 16;
 uint256 constant FORS_PKSEED_LEN    = 16;
-uint256 constant FORS_TREE_LEN      = 16 + FORS_A * 16;            // 176
-uint256 constant FORS_SECTION_LEN   = (FORS_K - 1) * FORS_TREE_LEN;// 2,288
+uint256 constant FORS_TREE_LEN      = 16 + FORS_A * 16;            // 96
+uint256 constant FORS_SECTION_LEN   = (FORS_K - 1) * FORS_TREE_LEN;// 2,400
 uint256 constant FORS_COUNTER_LEN   = 16;
 uint256 constant FORS_SIG_LEN       =
-    FORS_R_LEN + FORS_PKSEED_LEN + FORS_SECTION_LEN + FORS_COUNTER_LEN; // 2,336
+    FORS_R_LEN + FORS_PKSEED_LEN + FORS_SECTION_LEN + FORS_COUNTER_LEN; // 2,448
 
 uint256 constant FORS_R_OFFSET       = 0;
 uint256 constant FORS_PKSEED_OFFSET  = FORS_R_OFFSET + FORS_R_LEN;     // 16
 uint256 constant FORS_SECTION_OFFSET = FORS_PKSEED_OFFSET + FORS_PKSEED_LEN; // 32
-uint256 constant FORS_COUNTER_OFFSET = FORS_SECTION_OFFSET + FORS_SECTION_LEN; // 2,320
+uint256 constant FORS_COUNTER_OFFSET = FORS_SECTION_OFFSET + FORS_SECTION_LEN; // 2,432
+uint256 constant FORS_ROOTS_HASH_LEN = (FORS_K + 1) * 32; // 864
+uint256 constant FORS_SCRATCH_OFFSET = 0x380;
+
+// The verifier below is intentionally specialized for the current gas target:
+// A=5 is unrolled, and scratch memory must sit after the roots hash input.
+uint256 constant FORS_A_UNROLL_GUARD = 1 / (FORS_A == 5 ? 1 : 0);
+uint256 constant FORS_SCRATCH_ALIGN_GUARD = 1 / (FORS_SCRATCH_OFFSET % 64 == 0 ? 1 : 0);
+uint256 constant FORS_SCRATCH_OVERLAP_GUARD =
+    1 / (FORS_SCRATCH_OFFSET >= FORS_ROOTS_HASH_LEN ? 1 : 0);
 
 // --- Derived: bit ops ---
 
@@ -118,35 +127,27 @@ contract ForsVerifier is IForsVerifier {
     function recover(
         bytes calldata sig,
         bytes32 digest
-    ) external pure override returns (address signer) {
+    ) external pure override returns (address) {
         // Hoist computed constants into locals — Solidity inline assembly
         // only accepts numeric literals or value-typed locals as operands.
-        // Putting all parameter-derived values here means changing FORS_K
-        // / FORS_A at the top of the file is enough to retune the verifier;
-        // no assembly literal needs to be touched.
+        // The Merkle climb below is intentionally unrolled for A=5; changing
+        // FORS_A requires updating that block, not only these locals.
         uint256 SIG_LEN_       = FORS_SIG_LEN;
         uint256 N_MASK         = FORS_TOP_N_MASK;
         uint256 DOM            = FORS_DOM;
         uint256 SECTION_OFF    = FORS_SECTION_OFFSET;
         uint256 COUNTER_OFF    = FORS_COUNTER_OFFSET;
         uint256 TREE_LEN_      = FORS_TREE_LEN;             // 16 + A·16
-        uint256 ROOTS_HASH_LEN = (FORS_K + 1) * 32;         // pkSeed + ADRS + (K-1)·N
+        uint256 ROOTS_HASH_LEN = FORS_ROOTS_HASH_LEN;       // pkSeed + ADRS + (K-1)·N
 
         // Parameter-derived loop bounds and bit masks:
         uint256 KMINUS1   = FORS_K - 1;                      // outer tree-open loop bound
-        uint256 A_        = FORS_A;                          // inner-loop bound, A·t shift, leaf-ADRS shift
-        uint256 AMINUS1   = FORS_A - 1;                      // globalY shift base (A-1-j)
         uint256 MD_MASK   = (uint256(1) << FORS_A) - 1;      // mdT mask = (1<<A) - 1
         uint256 KMINUS1_A = (FORS_K - 1) * FORS_A;           // bit offset of the K-th mdT field in dVal
 
         if (sig.length != SIG_LEN_) return address(0);
 
         assembly ("memory-safe") {
-            // Save FMP — the loops below trample 0x40 and 0x60 (Solidity's
-            // FMP slot and zero slot) using them as keccak input scratch.
-            // We restore both before falling through to Solidity's return.
-            let fmpBackup := mload(0x40)
-
             let sigBase := sig.offset
 
             // R, pkSeed, counter: each is 16 B kept in the top half of a
@@ -174,73 +175,104 @@ contract ForsVerifier is IForsVerifier {
             // md[t] = (dVal >> (A·t)) & ((1<<A) - 1)   for t = 0..K-2
             // (LSB-first; (K-1) · A bits of dVal are consumed.)
 
-            // From here on, pkSeed sits at 0x00 for every hash call.
-            // It was already written for the Hmsg keccak above and
-            // nothing in the loops below touches 0x00, so no re-store
-            // is needed.
+            // Keep pkSeed at 0x00 for final compression/address. Tree hashes
+            // use 0x40-aligned scratch after the K=26 roots buffer so roots
+            // can be written directly at 0x40 + 32*t. If K grows past this
+            // layout, move the scratch base before retuning.
+            mstore(0x380, pkSeed)
 
             // ─── FORS tree verification (K-1 real trees) ───
             //   ADRS base for FORS at this standalone keypair:
             //   type=3, layer=tree=kp=0
             let forsBase := shl(128, 3)
 
-            for { let t := 0 } lt(t, KMINUS1) { t := add(t, 1) } {
+            for {
+                let t := 0
+                let treePtr := add(sigBase, SECTION_OFF)
+                let rootPtr := 0x40
+                let tLeafBase := 0
+                let dCursor := dVal
+            } lt(t, KMINUS1) {
+                t := add(t, 1)
+                treePtr := add(treePtr, TREE_LEN_)
+                rootPtr := add(rootPtr, 0x20)
+                tLeafBase := add(tLeafBase, 0x20)
+                dCursor := shr(5, dCursor)
+            } {
                 // mdT = (dVal >> (A·t)) & MD_MASK
-                let mdT     := and(shr(mul(A_, t), dVal), MD_MASK)
-                let treeOff := add(SECTION_OFF, mul(t, TREE_LEN_))
-                let sk      := and(calldataload(add(sigBase, treeOff)), N_MASK)
+                let mdT := and(dCursor, MD_MASK)
+                let sk := and(calldataload(treePtr), N_MASK)
 
                 // Leaf ADRS: cp=0, ha = (t << A) | mdT
-                mstore(0x20, or(forsBase, or(shl(A_, t), mdT)))
-                mstore(0x40, sk)
-                let node := and(keccak256(0x00, 0x60), N_MASK)
+                mstore(0x3a0, or(forsBase, or(tLeafBase, mdT)))
+                mstore(0x3c0, sk)
+                let node := and(keccak256(0x380, 0x60), N_MASK)
 
-                // Climb A auth-path levels.
-                // authPtr pre-increments by 16 each iteration. The
-                // sibling calldataload is inlined at its mstore use
-                // site so the optimizer can fold it (a named local
-                // would have to live across the ADRS construction
-                // and pay stack-materialization gas).
-                let authPtr := add(sigBase, add(treeOff, 16))
+                // Climb the fixed A=5 auth-path. Scratch is 0x40-aligned so
+                // xor(base, 0x20) swaps left/right without branching.
                 let pathIdx := mdT
-                for { let j := 0 } lt(j, A_) { j := add(j, 1) } {
-                    let parentIdx := shr(1, pathIdx)
-                    // globalY = (t << (A-1-j)) | parentIdx
-                    let globalY := or(shl(sub(AMINUS1, j), t), parentIdx)
-                    mstore(0x20, or(forsBase, or(shl(32, add(j, 1)), globalY)))
+
+                {
                     let s := shl(5, and(pathIdx, 1))
-                    mstore(xor(0x40, s), node)
-                    mstore(xor(0x60, s), and(calldataload(authPtr), N_MASK))
-                    authPtr := add(authPtr, 16)
-                    node := and(keccak256(0x00, 0x80), N_MASK)
-                    pathIdx := parentIdx
+                    pathIdx := shr(1, pathIdx)
+                    let globalY := or(shl(4, t), pathIdx)
+                    mstore(0x3a0, or(forsBase, or(0x100000000, globalY)))
+                    mstore(xor(0x3c0, s), node)
+                    mstore(xor(0x3e0, s), and(calldataload(add(treePtr, 16)), N_MASK))
+                    node := and(keccak256(0x380, 0x80), N_MASK)
                 }
-                // Stash root at 0x80 + t·0x20.
-                mstore(add(0x80, shl(5, t)), node)
+                {
+                    let s := shl(5, and(pathIdx, 1))
+                    pathIdx := shr(1, pathIdx)
+                    let globalY := or(shl(3, t), pathIdx)
+                    mstore(0x3a0, or(forsBase, or(0x200000000, globalY)))
+                    mstore(xor(0x3c0, s), node)
+                    mstore(xor(0x3e0, s), and(calldataload(add(treePtr, 32)), N_MASK))
+                    node := and(keccak256(0x380, 0x80), N_MASK)
+                }
+                {
+                    let s := shl(5, and(pathIdx, 1))
+                    pathIdx := shr(1, pathIdx)
+                    let globalY := or(shl(2, t), pathIdx)
+                    mstore(0x3a0, or(forsBase, or(0x300000000, globalY)))
+                    mstore(xor(0x3c0, s), node)
+                    mstore(xor(0x3e0, s), and(calldataload(add(treePtr, 48)), N_MASK))
+                    node := and(keccak256(0x380, 0x80), N_MASK)
+                }
+                {
+                    let s := shl(5, and(pathIdx, 1))
+                    pathIdx := shr(1, pathIdx)
+                    let globalY := or(shl(1, t), pathIdx)
+                    mstore(0x3a0, or(forsBase, or(0x400000000, globalY)))
+                    mstore(xor(0x3c0, s), node)
+                    mstore(xor(0x3e0, s), and(calldataload(add(treePtr, 64)), N_MASK))
+                    node := and(keccak256(0x380, 0x80), N_MASK)
+                }
+                {
+                    let s := shl(5, and(pathIdx, 1))
+                    pathIdx := shr(1, pathIdx)
+                    let globalY := or(t, pathIdx)
+                    mstore(0x3a0, or(forsBase, or(0x500000000, globalY)))
+                    mstore(xor(0x3c0, s), node)
+                    mstore(xor(0x3e0, s), and(calldataload(add(treePtr, 80)), N_MASK))
+                    node := and(keccak256(0x380, 0x80), N_MASK)
+                }
+                mstore(rootPtr, node)
             }
 
             // ─── Compress K-1 FORS roots ───
             //   T(seed, ADRS_roots, root_0..root_{K-2}) over (K+1)·32 bytes
-            {
-                let adrsRoots := shl(128, 4)   // type=FORS_ROOTS, kp=0
-                mstore(0x20, adrsRoots)
-                // Pack pattern: pack[t] at 0x40+t·32, source[t] at 0x80+t·32.
-                // Safe because pack[t] overwrites source[t-2] (already consumed).
-                for { let t := 0 } lt(t, KMINUS1) { t := add(t, 1) } {
-                    mstore(add(0x40, shl(5, t)), mload(add(0x80, shl(5, t))))
-                }
-            }
+            mstore(0x20, shl(128, 4)) // type=FORS_ROOTS, kp=0
             let pkRoot := and(keccak256(0x00, ROOTS_HASH_LEN), N_MASK)
 
             // ─── Address = keccak256(pad32(pkSeed) || pad32(pkRoot))[12:32] ───
             // pkSeed is still at 0x00 from the Hmsg setup — no rewrite needed.
             mstore(0x20, pkRoot)
-            signer := and(keccak256(0x00, 0x40),
+            let signer := and(keccak256(0x00, 0x40),
                 0x000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
 
-            // Restore FMP and zero slot for whatever follows in Solidity.
-            mstore(0x40, fmpBackup)
-            mstore(0x60, 0)
+            mstore(0x00, signer)
+            return(0x00, 0x20)
         }
     }
 }

@@ -15,6 +15,7 @@ broadcast/
 docs/*
 !docs/fors-parameters.md
 !docs/fors-two-forest-cache.md
+!docs/signing-spec.md
 
 # Dotenv file
 .env
