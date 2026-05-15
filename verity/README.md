@@ -59,6 +59,13 @@ This does not yet prove the optimized Solidity verifier in
 - `artifacts/fors-full-verifier-kernel/ForsFullVerifierKernel.yul`: generated
   Yul for the typed/raw full-verifier kernel, including
   `recover(bytes,bytes32)`.
+- `artifacts/fors-full-verifier-kernel/ForsFullVerifierKernel.solc.json`: Solc
+  artifact for the generated full-verifier Yul, used by the Forge parity test
+  because Foundry does not compile this Yul artifact as part of the normal
+  Solidity test build.
+- `../test/VerityForsFullVerifier.t.sol`: concrete parity test that deploys the
+  Solc artifact, runs `recover(bytes,bytes32)` on the Python-generated FORS
+  vector, checks bad-length rejection, and pins the generated Yul source hash.
 
 ## Proof Boundary
 
@@ -102,6 +109,19 @@ lake exe verity-compiler \
   --module NiceTry.Fors.Verity.FullVerifierKernel \
   --output artifacts/fors-full-verifier-kernel
 ```
+
+The concrete generated-artifact parity test is run from the repository root:
+
+```bash
+forge test --match-contract VerityForsFullVerifierTest -vvv
+```
+
+If the Yul is regenerated, refresh
+`artifacts/fors-full-verifier-kernel/ForsFullVerifierKernel.solc.json` from a
+Solc/Foundry compile of that Yul source and update the pinned source hash in
+the Forge test. The current local Foundry nightly emits the Yul artifact JSON
+successfully but then reports a Solar lint error on strict-Yul `object "Name"`
+syntax.
 
 On this Windows machine, `evmyul` required a local dependency-cache adjustment
 to use LLVM clang instead of a hardcoded `cc` command and to omit the Unix-only

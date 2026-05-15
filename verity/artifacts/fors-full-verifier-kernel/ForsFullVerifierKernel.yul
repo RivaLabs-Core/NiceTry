@@ -150,6 +150,40 @@ object "ForsFullVerifierKernel" {
             __ret0 := and(digest, 1461501637330902918203684832716283019655932542975)
             leave
         }
+        function internal_internal_recoverTypedChecked(maskedR, maskedPkSeed, digest, maskedCounter, openings_data_offset, openings_length) -> __ret0 {
+            let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
+            let ok := internal_internal_forcedZero(dVal)
+            {
+                let __ite_cond := ok
+                if __ite_cond {
+                    mstore(0, maskedPkSeed)
+                    for {
+                        let t := 0
+                    } lt(t, 25) {
+                        t := add(t, 1)
+                    } {
+                        let leafIdx := internal_internal_indexAt(dVal, t)
+                        let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
+                        let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
+                        let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
+                        let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
+                        let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
+                        let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
+                        let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                        let rootPtr := add(64, mul(t, 32))
+                        mstore(rootPtr, root)
+                    }
+                    let pkRoot := internal_internal_compressRoots(maskedPkSeed)
+                    let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
+                    __ret0 := signer
+                    leave
+                }
+                if iszero(__ite_cond) {
+                    __ret0 := 0
+                    leave
+                }
+            }
+        }
         function internal_internal_recoverTyped(r, pkSeed, digest, counter, openings_data_offset, openings_length) -> __ret0 {
             {
                 let __ite_cond := eq(openings_length, 150)
@@ -157,38 +191,47 @@ object "ForsFullVerifierKernel" {
                     let maskedR := and(r, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                     let maskedPkSeed := and(pkSeed, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                     let maskedCounter := and(counter, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
-                    let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
-                    let ok := internal_internal_forcedZero(dVal)
-                    {
-                        let __ite_cond := ok
-                        if __ite_cond {
-                            mstore(0, maskedPkSeed)
-                            for {
-                                let t := 0
-                            } lt(t, 25) {
-                                t := add(t, 1)
-                            } {
-                                let leafIdx := internal_internal_indexAt(dVal, t)
-                                let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
-                                let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
-                                let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
-                                let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
-                                let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
-                                let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
-                                let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
-                                let rootPtr := add(64, mul(t, 32))
-                                mstore(rootPtr, root)
-                            }
-                            let pkRoot := internal_internal_compressRoots(maskedPkSeed)
-                            let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
-                            __ret0 := signer
-                            leave
-                        }
-                        if iszero(__ite_cond) {
-                            __ret0 := 0
-                            leave
-                        }
+                    let signer := internal_internal_recoverTypedChecked(maskedR, maskedPkSeed, digest, maskedCounter, openings_data_offset, openings_length)
+                    __ret0 := signer
+                    leave
+                }
+                if iszero(__ite_cond) {
+                    __ret0 := 0
+                    leave
+                }
+            }
+        }
+        function internal_internal_recoverRawChecked(sigData, digestWord) -> __ret0 {
+            let r := internal_internal_rawWord(sigData, 0)
+            let pkSeed := internal_internal_rawWord(sigData, 16)
+            let counter := internal_internal_rawWord(sigData, 2432)
+            let dVal := internal_internal_hMsg(pkSeed, r, digestWord, counter)
+            let ok := internal_internal_forcedZero(dVal)
+            {
+                let __ite_cond := ok
+                if __ite_cond {
+                    mstore(0, pkSeed)
+                    for {
+                        let t := 0
+                    } lt(t, 25) {
+                        t := add(t, 1)
+                    } {
+                        let leafIdx := internal_internal_indexAt(dVal, t)
+                        let treeBase := add(32, mul(t, 96))
+                        let sk := internal_internal_rawWord(sigData, treeBase)
+                        let auth0 := internal_internal_rawWord(sigData, add(treeBase, 16))
+                        let auth1 := internal_internal_rawWord(sigData, add(treeBase, 32))
+                        let auth2 := internal_internal_rawWord(sigData, add(treeBase, 48))
+                        let auth3 := internal_internal_rawWord(sigData, add(treeBase, 64))
+                        let auth4 := internal_internal_rawWord(sigData, add(treeBase, 80))
+                        let root := internal_internal_reconstructTree(pkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                        let rootPtr := add(64, mul(t, 32))
+                        mstore(rootPtr, root)
                     }
+                    let pkRoot := internal_internal_compressRoots(pkSeed)
+                    let signer := internal_internal_addressFromRoot(pkSeed, pkRoot)
+                    __ret0 := signer
+                    leave
                 }
                 if iszero(__ite_cond) {
                     __ret0 := 0
@@ -348,6 +391,40 @@ object "ForsFullVerifierKernel" {
                 __ret0 := and(digest, 1461501637330902918203684832716283019655932542975)
                 leave
             }
+            function internal_internal_recoverTypedChecked(maskedR, maskedPkSeed, digest, maskedCounter, openings_data_offset, openings_length) -> __ret0 {
+                let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
+                let ok := internal_internal_forcedZero(dVal)
+                {
+                    let __ite_cond := ok
+                    if __ite_cond {
+                        mstore(0, maskedPkSeed)
+                        for {
+                            let t := 0
+                        } lt(t, 25) {
+                            t := add(t, 1)
+                        } {
+                            let leafIdx := internal_internal_indexAt(dVal, t)
+                            let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
+                            let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
+                            let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
+                            let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
+                            let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
+                            let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
+                            let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                            let rootPtr := add(64, mul(t, 32))
+                            mstore(rootPtr, root)
+                        }
+                        let pkRoot := internal_internal_compressRoots(maskedPkSeed)
+                        let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
+                        __ret0 := signer
+                        leave
+                    }
+                    if iszero(__ite_cond) {
+                        __ret0 := 0
+                        leave
+                    }
+                }
+            }
             function internal_internal_recoverTyped(r, pkSeed, digest, counter, openings_data_offset, openings_length) -> __ret0 {
                 {
                     let __ite_cond := eq(openings_length, 150)
@@ -355,38 +432,47 @@ object "ForsFullVerifierKernel" {
                         let maskedR := and(r, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                         let maskedPkSeed := and(pkSeed, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                         let maskedCounter := and(counter, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
-                        let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
-                        let ok := internal_internal_forcedZero(dVal)
-                        {
-                            let __ite_cond := ok
-                            if __ite_cond {
-                                mstore(0, maskedPkSeed)
-                                for {
-                                    let t := 0
-                                } lt(t, 25) {
-                                    t := add(t, 1)
-                                } {
-                                    let leafIdx := internal_internal_indexAt(dVal, t)
-                                    let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
-                                    let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
-                                    let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
-                                    let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
-                                    let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
-                                    let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
-                                    let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
-                                    let rootPtr := add(64, mul(t, 32))
-                                    mstore(rootPtr, root)
-                                }
-                                let pkRoot := internal_internal_compressRoots(maskedPkSeed)
-                                let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
-                                __ret0 := signer
-                                leave
-                            }
-                            if iszero(__ite_cond) {
-                                __ret0 := 0
-                                leave
-                            }
+                        let signer := internal_internal_recoverTypedChecked(maskedR, maskedPkSeed, digest, maskedCounter, openings_data_offset, openings_length)
+                        __ret0 := signer
+                        leave
+                    }
+                    if iszero(__ite_cond) {
+                        __ret0 := 0
+                        leave
+                    }
+                }
+            }
+            function internal_internal_recoverRawChecked(sigData, digestWord) -> __ret0 {
+                let r := internal_internal_rawWord(sigData, 0)
+                let pkSeed := internal_internal_rawWord(sigData, 16)
+                let counter := internal_internal_rawWord(sigData, 2432)
+                let dVal := internal_internal_hMsg(pkSeed, r, digestWord, counter)
+                let ok := internal_internal_forcedZero(dVal)
+                {
+                    let __ite_cond := ok
+                    if __ite_cond {
+                        mstore(0, pkSeed)
+                        for {
+                            let t := 0
+                        } lt(t, 25) {
+                            t := add(t, 1)
+                        } {
+                            let leafIdx := internal_internal_indexAt(dVal, t)
+                            let treeBase := add(32, mul(t, 96))
+                            let sk := internal_internal_rawWord(sigData, treeBase)
+                            let auth0 := internal_internal_rawWord(sigData, add(treeBase, 16))
+                            let auth1 := internal_internal_rawWord(sigData, add(treeBase, 32))
+                            let auth2 := internal_internal_rawWord(sigData, add(treeBase, 48))
+                            let auth3 := internal_internal_rawWord(sigData, add(treeBase, 64))
+                            let auth4 := internal_internal_rawWord(sigData, add(treeBase, 80))
+                            let root := internal_internal_reconstructTree(pkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                            let rootPtr := add(64, mul(t, 32))
+                            mstore(rootPtr, root)
                         }
+                        let pkRoot := internal_internal_compressRoots(pkSeed)
+                        let signer := internal_internal_addressFromRoot(pkSeed, pkRoot)
+                        __ret0 := signer
+                        leave
                     }
                     if iszero(__ite_cond) {
                         __ret0 := 0
@@ -808,6 +894,69 @@ object "ForsFullVerifierKernel" {
                         mstore(0, and(digest, 1461501637330902918203684832716283019655932542975))
                         return(0, 32)
                     }
+                    case 0x4bbcf5c1 {
+                        /* recoverTypedChecked() */
+                        if callvalue() {
+                            revert(0, 0)
+                        }
+                        if lt(calldatasize(), 164) {
+                            revert(0, 0)
+                        }
+                        if lt(calldatasize(), 164) {
+                            revert(0, 0)
+                        }
+                        let maskedR := calldataload(4)
+                        let maskedPkSeed := calldataload(36)
+                        let digest := calldataload(68)
+                        let maskedCounter := calldataload(100)
+                        let openings_offset := calldataload(132)
+                        if lt(openings_offset, 160) {
+                            revert(0, 0)
+                        }
+                        let openings_abs_offset := add(4, openings_offset)
+                        if gt(openings_abs_offset, sub(calldatasize(), 32)) {
+                            revert(0, 0)
+                        }
+                        let openings_length := calldataload(openings_abs_offset)
+                        let openings_tail_head_end := add(openings_abs_offset, 32)
+                        let openings_tail_remaining := sub(calldatasize(), openings_tail_head_end)
+                        if gt(openings_length, div(openings_tail_remaining, 32)) {
+                            revert(0, 0)
+                        }
+                        let openings_data_offset := openings_tail_head_end
+                        let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
+                        let ok := internal_internal_forcedZero(dVal)
+                        {
+                            let __ite_cond := ok
+                            if __ite_cond {
+                                mstore(0, maskedPkSeed)
+                                for {
+                                    let t := 0
+                                } lt(t, 25) {
+                                    t := add(t, 1)
+                                } {
+                                    let leafIdx := internal_internal_indexAt(dVal, t)
+                                    let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
+                                    let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
+                                    let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
+                                    let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
+                                    let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
+                                    let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
+                                    let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                                    let rootPtr := add(64, mul(t, 32))
+                                    mstore(rootPtr, root)
+                                }
+                                let pkRoot := internal_internal_compressRoots(maskedPkSeed)
+                                let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
+                                mstore(0, signer)
+                                return(0, 32)
+                            }
+                            if iszero(__ite_cond) {
+                                mstore(0, 0)
+                                return(0, 32)
+                            }
+                        }
+                    }
                     case 0xbc70497f {
                         /* recoverTyped() */
                         if callvalue() {
@@ -844,38 +993,59 @@ object "ForsFullVerifierKernel" {
                                 let maskedR := and(r, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                                 let maskedPkSeed := and(pkSeed, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
                                 let maskedCounter := and(counter, 115792089237316195423570985008687907852929702298719625575994209400481361428480)
-                                let dVal := internal_internal_hMsg(maskedPkSeed, maskedR, digest, maskedCounter)
-                                let ok := internal_internal_forcedZero(dVal)
-                                {
-                                    let __ite_cond := ok
-                                    if __ite_cond {
-                                        mstore(0, maskedPkSeed)
-                                        for {
-                                            let t := 0
-                                        } lt(t, 25) {
-                                            t := add(t, 1)
-                                        } {
-                                            let leafIdx := internal_internal_indexAt(dVal, t)
-                                            let sk := internal_internal_openingAt(openings_data_offset, openings_length, t, 0)
-                                            let auth0 := internal_internal_openingAt(openings_data_offset, openings_length, t, 1)
-                                            let auth1 := internal_internal_openingAt(openings_data_offset, openings_length, t, 2)
-                                            let auth2 := internal_internal_openingAt(openings_data_offset, openings_length, t, 3)
-                                            let auth3 := internal_internal_openingAt(openings_data_offset, openings_length, t, 4)
-                                            let auth4 := internal_internal_openingAt(openings_data_offset, openings_length, t, 5)
-                                            let root := internal_internal_reconstructTree(maskedPkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
-                                            let rootPtr := add(64, mul(t, 32))
-                                            mstore(rootPtr, root)
-                                        }
-                                        let pkRoot := internal_internal_compressRoots(maskedPkSeed)
-                                        let signer := internal_internal_addressFromRoot(maskedPkSeed, pkRoot)
-                                        mstore(0, signer)
-                                        return(0, 32)
-                                    }
-                                    if iszero(__ite_cond) {
-                                        mstore(0, 0)
-                                        return(0, 32)
-                                    }
+                                let signer := internal_internal_recoverTypedChecked(maskedR, maskedPkSeed, digest, maskedCounter, openings_data_offset, openings_length)
+                                mstore(0, signer)
+                                return(0, 32)
+                            }
+                            if iszero(__ite_cond) {
+                                mstore(0, 0)
+                                return(0, 32)
+                            }
+                        }
+                    }
+                    case 0x7f606326 {
+                        /* recoverRawChecked() */
+                        if callvalue() {
+                            revert(0, 0)
+                        }
+                        if lt(calldatasize(), 68) {
+                            revert(0, 0)
+                        }
+                        if lt(calldatasize(), 68) {
+                            revert(0, 0)
+                        }
+                        let sigData := calldataload(4)
+                        let digestWord := calldataload(36)
+                        let r := internal_internal_rawWord(sigData, 0)
+                        let pkSeed := internal_internal_rawWord(sigData, 16)
+                        let counter := internal_internal_rawWord(sigData, 2432)
+                        let dVal := internal_internal_hMsg(pkSeed, r, digestWord, counter)
+                        let ok := internal_internal_forcedZero(dVal)
+                        {
+                            let __ite_cond := ok
+                            if __ite_cond {
+                                mstore(0, pkSeed)
+                                for {
+                                    let t := 0
+                                } lt(t, 25) {
+                                    t := add(t, 1)
+                                } {
+                                    let leafIdx := internal_internal_indexAt(dVal, t)
+                                    let treeBase := add(32, mul(t, 96))
+                                    let sk := internal_internal_rawWord(sigData, treeBase)
+                                    let auth0 := internal_internal_rawWord(sigData, add(treeBase, 16))
+                                    let auth1 := internal_internal_rawWord(sigData, add(treeBase, 32))
+                                    let auth2 := internal_internal_rawWord(sigData, add(treeBase, 48))
+                                    let auth3 := internal_internal_rawWord(sigData, add(treeBase, 64))
+                                    let auth4 := internal_internal_rawWord(sigData, add(treeBase, 80))
+                                    let root := internal_internal_reconstructTree(pkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
+                                    let rootPtr := add(64, mul(t, 32))
+                                    mstore(rootPtr, root)
                                 }
+                                let pkRoot := internal_internal_compressRoots(pkSeed)
+                                let signer := internal_internal_addressFromRoot(pkSeed, pkRoot)
+                                mstore(0, signer)
+                                return(0, 32)
                             }
                             if iszero(__ite_cond) {
                                 mstore(0, 0)
@@ -917,43 +1087,10 @@ object "ForsFullVerifierKernel" {
                             let __ite_cond := eq(sigLen, 2448)
                             if __ite_cond {
                                 let sigData := add(sigLenOffset, 32)
-                                let r := internal_internal_rawWord(sigData, 0)
-                                let pkSeed := internal_internal_rawWord(sigData, 16)
-                                let counter := internal_internal_rawWord(sigData, 2432)
                                 let digestWord := digest
-                                let dVal := internal_internal_hMsg(pkSeed, r, digestWord, counter)
-                                let ok := internal_internal_forcedZero(dVal)
-                                {
-                                    let __ite_cond := ok
-                                    if __ite_cond {
-                                        mstore(0, pkSeed)
-                                        for {
-                                            let t := 0
-                                        } lt(t, 25) {
-                                            t := add(t, 1)
-                                        } {
-                                            let leafIdx := internal_internal_indexAt(dVal, t)
-                                            let treeBase := add(32, mul(t, 96))
-                                            let sk := internal_internal_rawWord(sigData, treeBase)
-                                            let auth0 := internal_internal_rawWord(sigData, add(treeBase, 16))
-                                            let auth1 := internal_internal_rawWord(sigData, add(treeBase, 32))
-                                            let auth2 := internal_internal_rawWord(sigData, add(treeBase, 48))
-                                            let auth3 := internal_internal_rawWord(sigData, add(treeBase, 64))
-                                            let auth4 := internal_internal_rawWord(sigData, add(treeBase, 80))
-                                            let root := internal_internal_reconstructTree(pkSeed, t, leafIdx, sk, auth0, auth1, auth2, auth3, auth4)
-                                            let rootPtr := add(64, mul(t, 32))
-                                            mstore(rootPtr, root)
-                                        }
-                                        let pkRoot := internal_internal_compressRoots(pkSeed)
-                                        let signer := internal_internal_addressFromRoot(pkSeed, pkRoot)
-                                        mstore(0, signer)
-                                        return(0, 32)
-                                    }
-                                    if iszero(__ite_cond) {
-                                        mstore(0, 0)
-                                        return(0, 32)
-                                    }
-                                }
+                                let signer := internal_internal_recoverRawChecked(sigData, digestWord)
+                                mstore(0, signer)
+                                return(0, 32)
                             }
                             if iszero(__ite_cond) {
                                 mstore(0, 0)

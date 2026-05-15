@@ -154,37 +154,74 @@ verity_contract ForsFullVerifierKernel where
     let digest := keccak256 0x00 0x40
     return bitAnd digest 0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
 
-  function allow_post_interaction_writes recoverTyped
-      (r : Uint256, pkSeed : Uint256, digest : Uint256, counter : Uint256,
-       openings : Array Uint256)
+  function allow_post_interaction_writes recoverTypedChecked
+      (maskedR : Uint256, maskedPkSeed : Uint256, digest : Uint256,
+       maskedCounter : Uint256, openings : Array Uint256)
       local_obligations [full_verifier_memory_refinement := assumed "Prove that the full typed verifier memory choreography preserves pkSeed, writes all 25 roots at 0x40+32*t, keeps scratch at 0x380+, and matches the FORS+C transcript spec."]
       : Uint256 := do
+    let dVal <- hMsg maskedPkSeed maskedR digest maskedCounter
+    let ok <- forcedZero dVal
+    if ok then
+      unsafe "initialize roots hash buffer with pkSeed" do
+        mstore 0x00 maskedPkSeed
+      forEach "t" 25 (do
+        let leafIdx <- indexAt dVal t
+        let sk <- openingAt openings t 0
+        let auth0 <- openingAt openings t 1
+        let auth1 <- openingAt openings t 2
+        let auth2 <- openingAt openings t 3
+        let auth3 <- openingAt openings t 4
+        let auth4 <- openingAt openings t 5
+        let root <- reconstructTree maskedPkSeed t leafIdx sk auth0 auth1 auth2 auth3 auth4
+        let rootPtr := add 0x40 (mul t 0x20)
+        unsafe "write recovered tree root into roots buffer" do
+          mstore rootPtr root)
+      let pkRoot <- compressRoots maskedPkSeed
+      let signer <- addressFromRoot maskedPkSeed pkRoot
+      return signer
+    else
+      return 0
+
+  function allow_post_interaction_writes recoverTyped
+      (r : Uint256, pkSeed : Uint256, digest : Uint256, counter : Uint256,
+       openings : Array Uint256) : Uint256 := do
     if arrayLength openings == 150 then
       let maskedR := bitAnd r 0xffffffffffffffffffffffffffffffff00000000000000000000000000000000
       let maskedPkSeed := bitAnd pkSeed 0xffffffffffffffffffffffffffffffff00000000000000000000000000000000
       let maskedCounter := bitAnd counter 0xffffffffffffffffffffffffffffffff00000000000000000000000000000000
-      let dVal <- hMsg maskedPkSeed maskedR digest maskedCounter
-      let ok <- forcedZero dVal
-      if ok then
-        unsafe "initialize roots hash buffer with pkSeed" do
-          mstore 0x00 maskedPkSeed
-        forEach "t" 25 (do
-          let leafIdx <- indexAt dVal t
-          let sk <- openingAt openings t 0
-          let auth0 <- openingAt openings t 1
-          let auth1 <- openingAt openings t 2
-          let auth2 <- openingAt openings t 3
-          let auth3 <- openingAt openings t 4
-          let auth4 <- openingAt openings t 5
-          let root <- reconstructTree maskedPkSeed t leafIdx sk auth0 auth1 auth2 auth3 auth4
-          let rootPtr := add 0x40 (mul t 0x20)
-          unsafe "write recovered tree root into roots buffer" do
-            mstore rootPtr root)
-        let pkRoot <- compressRoots maskedPkSeed
-        let signer <- addressFromRoot maskedPkSeed pkRoot
-        return signer
-      else
-        return 0
+      let signer <- recoverTypedChecked maskedR maskedPkSeed digest maskedCounter openings
+      return signer
+    else
+      return 0
+
+  function allow_post_interaction_writes recoverRawChecked
+      (sigData : Uint256, digestWord : Uint256)
+      local_obligations [full_raw_verifier_memory_refinement := assumed "Prove that the raw verifier memory choreography preserves pkSeed, writes all 25 roots at 0x40+32*t, keeps scratch at 0x380+, and matches the FORS+C transcript spec."]
+      : Uint256 := do
+    let r <- rawWord sigData 0
+    let pkSeed <- rawWord sigData 16
+    let counter <- rawWord sigData 2432
+    let dVal <- hMsg pkSeed r digestWord counter
+    let ok <- forcedZero dVal
+    if ok then
+      unsafe "initialize roots hash buffer with parsed pkSeed" do
+        mstore 0x00 pkSeed
+      forEach "t" 25 (do
+        let leafIdx <- indexAt dVal t
+        let treeBase := add 32 (mul t 96)
+        let sk <- rawWord sigData treeBase
+        let auth0 <- rawWord sigData (add treeBase 16)
+        let auth1 <- rawWord sigData (add treeBase 32)
+        let auth2 <- rawWord sigData (add treeBase 48)
+        let auth3 <- rawWord sigData (add treeBase 64)
+        let auth4 <- rawWord sigData (add treeBase 80)
+        let root <- reconstructTree pkSeed t leafIdx sk auth0 auth1 auth2 auth3 auth4
+        let rootPtr := add 0x40 (mul t 0x20)
+        unsafe "write recovered raw tree root into roots buffer" do
+          mstore rootPtr root)
+      let pkRoot <- compressRoots pkSeed
+      let signer <- addressFromRoot pkSeed pkRoot
+      return signer
     else
       return 0
 
@@ -197,33 +234,9 @@ verity_contract ForsFullVerifierKernel where
     let sigLen := calldataload sigLenOffset
     if sigLen == 2448 then
       let sigData := add sigLenOffset 32
-      let r <- rawWord sigData 0
-      let pkSeed <- rawWord sigData 16
-      let counter <- rawWord sigData 2432
       let digestWord := toUint256 digest
-      let dVal <- hMsg pkSeed r digestWord counter
-      let ok <- forcedZero dVal
-      if ok then
-        unsafe "initialize roots hash buffer with parsed pkSeed" do
-          mstore 0x00 pkSeed
-        forEach "t" 25 (do
-          let leafIdx <- indexAt dVal t
-          let treeBase := add 32 (mul t 96)
-          let sk <- rawWord sigData treeBase
-          let auth0 <- rawWord sigData (add treeBase 16)
-          let auth1 <- rawWord sigData (add treeBase 32)
-          let auth2 <- rawWord sigData (add treeBase 48)
-          let auth3 <- rawWord sigData (add treeBase 64)
-          let auth4 <- rawWord sigData (add treeBase 80)
-          let root <- reconstructTree pkSeed t leafIdx sk auth0 auth1 auth2 auth3 auth4
-          let rootPtr := add 0x40 (mul t 0x20)
-          unsafe "write recovered raw tree root into roots buffer" do
-            mstore rootPtr root)
-        let pkRoot <- compressRoots pkSeed
-        let signer <- addressFromRoot pkSeed pkRoot
-        return wordToAddress signer
-      else
-        return zeroAddress
+      let signer <- recoverRawChecked sigData digestWord
+      return wordToAddress signer
     else
       return zeroAddress
 

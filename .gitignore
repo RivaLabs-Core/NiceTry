@@ -1,6 +1,8 @@
 # Compiler files
 cache/
 out/
+cache-verity/
+out-verity/
 __pycache__/
 *.py[cod]
 
