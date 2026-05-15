@@ -1,0 +1,11 @@
+# Canonical author/committer mapping for `git log`, `git shortlog`,
+# `git blame`, and GitHub's UI. The underlying commit objects are
+# unchanged; this file only affects how identities are *displayed*.
+#
+# Format: <canonical name> <canonical email> <commit name> <commit email>
+
+# Old test account used during an early misconfigured setup.
+AleBaiocchi <ale23.baiocchi@gmail.com> ronzohkiin <biflowmail@proton.me>
+
+# GitHub web-UI commits (privacy-protected noreply email).
+AleBaiocchi <ale23.baiocchi@gmail.com> alessandrobaiocchi <65308655+alessandrobaiocchi@users.noreply.github.com>
