@@ -27,3 +27,6 @@ lib/*
 node_modules/
 deployCommands.txt
 abi/
+
+# Lean/Lake local dependency and build cache
+verity/.lake/
